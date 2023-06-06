@@ -1,0 +1,24 @@
+
+env_state =
+    {'grid': grid, 'current_pos': current_pos, 'goal_pos': goal_pos}
+每次step只更新current_pos
+grid和goal_pos在reset就确定了
+grid_number = {0: pathway, 1: obstacle, 2 : reward, 3 : self_pos}
+grid = jnp.zeros((n_agents, height, width), dtype=jnp.int8)
+
+
+
+buffer_states =
+    {'buffer': buffer, 'insert_pos': jnp.array(insert_pos), 'max_size': jnp.array(max_size)}
+init_samples_for_buffer = [
+        obs_embed, action_embed, hidden, theta,
+        jnp.zeros((args.n_agents, 1)), jnp.zeros((args.n_agents, 1), dtype=jnp.int8),
+        jnp.zeros((args.n_agents, args.n_action)), jnp.zeros((args.n_agents, 1))
+    ]
+    =   [obs_embed, action_embed, new_hippo_hidden, theta,
+            rewards, new_actions, policy, value]
+
+当前环境没有障碍物,后边加一下
+
+dimensions = {'obs':144, 'theta':128, 'hippo_hidden':128, 'bottleneck_size':8, 'to_hippo':8, 'hippo_info':8}
+在PFC和hippocampus之间有bottleneck,都写在PFC里了
