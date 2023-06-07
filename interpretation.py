@@ -116,11 +116,15 @@ def main(args):
     hist_replay_place = [[] for _ in range(args.n_agents)]
     hist_actions = [[] for _ in range(args.n_agents)]
     hist_hippo = []
+    
+    plt.figure()
     for ei in range(args.epochs):
         # walk in the env and update buffer (model_step)
-        if ei%5==0:
+        if ei%30==0:
             print('epoch', ei)
         key, subkey = jax.random.split(key)
+        reward_pos = jnp.stack(jnp.where(env_state['grid']==2)[1:],axis=1)
+
         env_state, buffer_state, actions, hippo_hidden, theta, rewards, done, replayed_hippo_theta_output \
             = model_step(env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state,
                          subkey, actions, hippo_hidden, theta,
@@ -130,18 +134,15 @@ def main(args):
         replayed_hippo_history, replayed_theta_history, output_history = replayed_hippo_theta_output
         hist_hippo.append(replayed_hippo_history.reshape(-1,args.hidden_size))
         # replay_step * n_agents * hidden_size
+#### 这里把所有有意义的都加起来
         place = jnp.argmax(output_history[...,:-1],axis=-1)
-
-        reward_pos = jnp.stack(jnp.where(env_state['grid']==2)[1:],axis=1)
         
         for n in range(args.n_agents):
             hist_actions[n].append(actions[n])
             hist_pos[n].append(env_state['current_pos'][n])
             if rewards[n]:
                 if rewards[n] == 0.5:
-                    if n==40:
-                        print(env_state['grid'][n])
-                    hist_reward_pos[n].append(jnp.array((reward_pos[n][0],reward_pos[n][1],hist_pos[n][-1][0],hist_pos[n][-1][1])))
+                    hist_reward_pos[n].append(jnp.array((reward_pos[n][0],reward_pos[n][1])))
                 hist_replay_place[n].append(place[:,n]) # replay_step * hw
             if done[n]:
                 start_p = hist_pos[n].pop()
@@ -152,23 +153,22 @@ def main(args):
 
                 if hist_reward_pos[n]:
                     reward_pos_traj = jnp.stack(hist_reward_pos[n],axis=0)
-                if hist_replay_place[n]:
-                    print(n)
-                    print('pos and act traj')
+                if hist_replay_place[n] and hist_reward_pos[n]:
+                    print('state and action traj')
                     print(state_traj)
-                    plt.title(f'total_steps:{len(hist_pos[n])}')
+                    plt.title(f'{n}th agent, total_steps:{len(hist_pos[n])}')
                     plt.grid() # 生成网格
                     # print(hist_pos[n])
                     plt.plot(state_traj[:,0],state_traj[:,1])
-                    if hist_reward_pos[n]:
-                        plt.scatter(reward_pos_traj[:,0],reward_pos_traj[:,1], marker='*', s=100, c='r')
-                        print('reward pos')
-                        print(reward_pos_traj)
+
                     print('replay traj')
                     for replay_output in hist_replay_place[n]:
                         plt.plot(replay_output//10, replay_output%10, c='blue', marker='o', markersize=3)
                         print(jnp.stack((replay_output//10, replay_output%10),axis=-1))
+
+                    plt.scatter(reward_pos_traj[:,0],reward_pos_traj[:,1], marker='*', s=100, c='r')
                     plt.show()
+                    plt.cla()
                 # hist_traj[n].append((state_traj, reward_pos_traj))
                 hist_pos[n] = [start_p]
                 hist_reward_pos[n] = []
@@ -176,11 +176,13 @@ def main(args):
                 hist_actions[n] = [start_a]
 
         if ei%30==29:
+            plt.title('epoch '+str(ei)+' hippo hidden')
             pca = PCA(n_components=2)
             hist_hippo = np.concatenate(hist_hippo,axis=0)
             hist_hippo = pca.fit_transform(hist_hippo)
             plt.scatter(hist_hippo[:,0],hist_hippo[:,1])
             plt.show()
+            plt.cla()
             hist_hippo = []
 
     
