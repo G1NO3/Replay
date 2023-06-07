@@ -16,6 +16,7 @@ import os
 import matplotlib.pyplot as plt
 import train
 import numpy as np
+from sklearn.decomposition import PCA
 def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state,
                key, actions, hippo_hidden, theta,
                n_agents, bottleneck_size, replay_steps, height, width, visual_prob, temperature):
@@ -109,77 +110,87 @@ def main(args):
     hippo_hidden = jnp.zeros((args.n_agents, args.hidden_size))
     theta = jnp.zeros((args.n_agents, args.hidden_size))
 
-    hist_pos = [[] for _ in range(args.n_agents)]
-    hist_reward_pos = [[] for _ in range(args.n_agents)]
+    hist_pos = [[] for n in range(args.n_agents)]
+    hist_reward_pos = [[] for n in range(args.n_agents)]
     hist_traj = [[] for _ in range(args.n_agents)]
     hist_replay_place = [[] for _ in range(args.n_agents)]
-
+    hist_actions = [[] for _ in range(args.n_agents)]
+    hist_hippo = []
     for ei in range(args.epochs):
         # walk in the env and update buffer (model_step)
         if ei%5==0:
             print('epoch', ei)
         key, subkey = jax.random.split(key)
-### eval_step
         env_state, buffer_state, actions, hippo_hidden, theta, rewards, done, replayed_hippo_theta_output \
             = model_step(env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state,
                          subkey, actions, hippo_hidden, theta,
                          args.n_agents, args.bottleneck_size, args.replay_steps, args.height, args.width,
-                         args.visual_prob, temperature=1.)
+                         args.visual_prob, temperature=0.05)
         
         replayed_hippo_history, replayed_theta_history, output_history = replayed_hippo_theta_output
+        hist_hippo.append(replayed_hippo_history.reshape(-1,args.hidden_size))
         # replay_step * n_agents * hidden_size
         place = jnp.argmax(output_history[...,:-1],axis=-1)
-#####replay为什么只有4步
 
         reward_pos = jnp.stack(jnp.where(env_state['grid']==2)[1:],axis=1)
         
         for n in range(args.n_agents):
+            hist_actions[n].append(actions[n])
             hist_pos[n].append(env_state['current_pos'][n])
-            if rewards[n]==0.5:
-                print(n)
-                print(rewards[n])
-                print(reward_pos[n])
-                hist_reward_pos[n].append(reward_pos[n])
+            if rewards[n]:
+                if rewards[n] == 0.5:
+                    if n==40:
+                        print(env_state['grid'][n])
+                    hist_reward_pos[n].append(jnp.array((reward_pos[n][0],reward_pos[n][1],hist_pos[n][-1][0],hist_pos[n][-1][1])))
                 hist_replay_place[n].append(place[:,n]) # replay_step * hw
-            else:
-                hist_reward_pos[n].append(jnp.array([args.height-1, args.width-1]))
             if done[n]:
-                print(n)
-                current_p = hist_pos[n].pop()
+                start_p = hist_pos[n].pop()
+                start_a = hist_actions[n][-1]
                 hist_pos[n].append(env_state['goal_pos'][n])
-                current_r = hist_reward_pos[n].pop()
-                plt.title(f'total_steps:{len(hist_pos[n])}')
-                plt.grid() # 生成网格
-                # print(hist_pos[n])
-                plt.plot(jnp.stack(hist_pos[n],axis=0)[:,0],jnp.stack(hist_pos[n],axis=0)[:,1])
-### git 
+
+                state_traj = jnp.concatenate((jnp.stack(hist_pos[n],axis=0),jnp.stack(hist_actions[n],axis=0)),axis=1)
+
+                if hist_reward_pos[n]:
+                    reward_pos_traj = jnp.stack(hist_reward_pos[n],axis=0)
+                if hist_replay_place[n]:
+                    print(n)
+                    print('pos and act traj')
+                    print(state_traj)
+                    plt.title(f'total_steps:{len(hist_pos[n])}')
+                    plt.grid() # 生成网格
+                    # print(hist_pos[n])
+                    plt.plot(state_traj[:,0],state_traj[:,1])
+                    if hist_reward_pos[n]:
+                        plt.scatter(reward_pos_traj[:,0],reward_pos_traj[:,1], marker='*', s=100, c='r')
+                        print('reward pos')
+                        print(reward_pos_traj)
+                    print('replay traj')
+                    for replay_output in hist_replay_place[n]:
+                        plt.plot(replay_output//10, replay_output%10, c='blue', marker='o', markersize=3)
+                        print(jnp.stack((replay_output//10, replay_output%10),axis=-1))
+                    plt.show()
+                # hist_traj[n].append((state_traj, reward_pos_traj))
+                hist_pos[n] = [start_p]
+                hist_reward_pos[n] = []
+                hist_replay_place[n] = []
+                hist_actions[n] = [start_a]
+
+        if ei%30==29:
+            pca = PCA(n_components=2)
+            hist_hippo = np.concatenate(hist_hippo,axis=0)
+            hist_hippo = pca.fit_transform(hist_hippo)
+            plt.scatter(hist_hippo[:,0],hist_hippo[:,1])
+            plt.show()
+            hist_hippo = []
+
+    
+
+
 ### hippocampus 吸引子
 ### hippo_hidden_state 降维
 
 ### reward 调成2看一下来回走
-## checkpoint
-                for replay_output in hist_replay_place[n]:
-                    plt.plot(replay_output//10, replay_output%10, c='blue', marker='o', markersize=3)
-
-                hist_traj[n].append((jnp.stack(hist_pos[n],axis=0),jnp.stack(hist_reward_pos[n],axis=0)))
-                hist_pos[n] = [current_p]
-                hist_reward_pos[n] = [current_r]
-
-                showed_traj = hist_traj[n][-1]
-                pos, reward_pos = showed_traj[0], showed_traj[1]
-                plt.plot(pos[:,0],pos[:,1])
-                plt.scatter(reward_pos[:,0],reward_pos[:,1], marker='*', s=100, c='r')
-                
-                plt.show()
-                
-
-
-            
-
-    
-    obs_embed, action_embed, new_hippo_hidden, theta, rewards, new_actions, policy, value = buffer_state['buffer']
-    # obs_embed t * n * 144
-    
+## checkpoint 
 
 if __name__ == '__main__':
     args = train.parse_args()
