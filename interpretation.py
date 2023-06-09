@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import train
 import numpy as np
 from sklearn.decomposition import PCA
+import matplotlib as mpl
+
 def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state,
                key, actions, hippo_hidden, theta,
                n_agents, bottleneck_size, replay_steps, height, width, visual_prob, temperature):
@@ -116,6 +118,8 @@ def main(args):
     hist_replay_place = [[] for _ in range(args.n_agents)]
     hist_actions = [[] for _ in range(args.n_agents)]
     hist_hippo = []
+    reward_hippo = [[],[]]
+    # 0 for mid-path reward replay and 1 for goal replay
     
     plt.figure()
     for ei in range(args.epochs):
@@ -143,7 +147,11 @@ def main(args):
             if rewards[n]:
                 if rewards[n] == 0.5:
                     hist_reward_pos[n].append(jnp.array((reward_pos[n][0],reward_pos[n][1])))
+                    reward_hippo[0].append(replayed_hippo_history[:,n,:])
+                else:
+                    reward_hippo[1].append(replayed_hippo_history[:,n,:])
                 hist_replay_place[n].append(place[:,n]) # replay_step * hw
+                
             if done[n]:
                 start_p = hist_pos[n].pop()
                 start_a = hist_actions[n][-1]
@@ -156,7 +164,7 @@ def main(args):
                 if hist_replay_place[n] and hist_reward_pos[n]:
                     print('state and action traj')
                     print(state_traj)
-                    plt.title(f'{n}th agent, total_steps:{len(hist_pos[n])}')
+                    plt.title(f'{n}th agent, total_steps:{len(hist_pos[n])-1}')
                     plt.grid() # 生成网格
                     # print(hist_pos[n])
                     plt.plot(state_traj[:,0],state_traj[:,1])
@@ -167,7 +175,7 @@ def main(args):
                         print(jnp.stack((replay_output//10, replay_output%10),axis=-1))
 
                     plt.scatter(reward_pos_traj[:,0],reward_pos_traj[:,1], marker='*', s=100, c='r')
-                    plt.show()
+                    # plt.show()
                     plt.cla()
                 # hist_traj[n].append((state_traj, reward_pos_traj))
                 hist_pos[n] = [start_p]
@@ -176,14 +184,44 @@ def main(args):
                 hist_actions[n] = [start_a]
 
         if ei%30==29:
-            plt.title('epoch '+str(ei)+' hippo hidden')
+###用颜色标一下某个感兴趣变量会更清楚一些，比如用颜色区分初始位置，或者区分两种replay
+            plt.subplot(221)
+            plt.title('epoch '+str(ei)+' all hippo hidden')
             pca = PCA(n_components=2)
-            hist_hippo = np.concatenate(hist_hippo,axis=0)
-            hist_hippo = pca.fit_transform(hist_hippo)
-            plt.scatter(hist_hippo[:,0],hist_hippo[:,1])
+            ar_hist_hippo = np.concatenate(hist_hippo,axis=0)
+            ar_hist_hippo = pca.fit_transform(ar_hist_hippo)
+            c_idx = np.arange(8).repeat((ar_hist_hippo.shape[0]//args.replay_steps),)
+            plt.scatter(ar_hist_hippo[:,0],ar_hist_hippo[:,1],c=c_idx,cmap='viridis')
+
+            plt.subplot(222)
+            plt.title('epoch '+str(ei)+' all mid reward hidden')
+            mid_reward_hippo = np.concatenate(reward_hippo[0],axis=0)
+            mid_reward_hippo = pca.fit_transform(mid_reward_hippo)
+            # (replay_steps*n_agent*n_sample) * hidden_size
+            c_idx = np.arange(8).repeat((mid_reward_hippo.shape[0]//args.replay_steps),)
+            plt.scatter(mid_reward_hippo[:,0],mid_reward_hippo[:,1],c=c_idx,cmap='viridis')
+
+            plt.subplot(223)
+            plt.title('epoch '+str(ei)+' goal hidden')
+            goal_hippo = np.concatenate(reward_hippo[1],axis=0)
+            goal_hippo = pca.fit_transform(goal_hippo)
+            # (replay_steps*n_agent*n_sample) * hidden_size
+            c_idx = np.arange(8).repeat((goal_hippo.shape[0]//args.replay_steps),)
+            plt.scatter(goal_hippo[:,0],goal_hippo[:,1],c=c_idx,cmap='viridis')
+
+            plt.subplot(224)
+            plt.title('epoch '+str(ei)+' all reward hidden')
+            all_reward_hippo = np.concatenate((mid_reward_hippo, goal_hippo),axis=0)
+            all_reward_hippo = pca.fit_transform(all_reward_hippo)
+            # (replay_steps*n_agent*n_sample) * hidden_size
+            c_idx = np.arange(8).repeat((all_reward_hippo.shape[0]//args.replay_steps),)
+            plt.scatter(all_reward_hippo[:,0],all_reward_hippo[:,1],c=c_idx,cmap='viridis')
+            cmap = mpl.cm.viridis
+            norm = mpl.colors.BoundaryNorm(np.arange(9), cmap.N, extend='neither')
+            plt.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap='viridis'),orientation='horizontal')
             plt.show()
             plt.cla()
-            hist_hippo = []
+            
 
     
 
