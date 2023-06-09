@@ -224,10 +224,10 @@ def main(args):
             
 
     
-
+### 探索一下降维的意义，比如是否和agent的策略好坏有关，或者和reward奖励变化有关
 
 ### hippocampus 吸引子
-### hippo_hidden_state 降维
+### hippo_hidden_state UMAP降维
 
 ### reward 调成2看一下来回走
 ## checkpoint 
