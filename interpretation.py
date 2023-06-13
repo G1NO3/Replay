@@ -241,7 +241,8 @@ def main(args,colormap='Set1'):
                 ax3.scatter(ar_short[:,0],ar_short[:,1],c=c_idx,cmap=colormap)
 #检查一下这里的cmap有没有问题
             cmap = eval('mpl.cm.'+colormap)
-            norm = mpl.colors.BoundaryNorm(np.arange(9), cmap.N, extend='neither')
+            # norm = mpl.colors.BoundaryNorm(np.arange(9), cmap.N, extend='neither')
+            norm = mpl.colors.Normalize(vmin=0, vmax=7)
             fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=colormap))
             plt.show()
 
@@ -261,6 +262,6 @@ def main(args,colormap='Set1'):
 if __name__ == '__main__':
     args = train.parse_args()
 
-    main(args)
+    main(args,colormap='Set2')
     
     
