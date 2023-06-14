@@ -19,9 +19,11 @@ import numpy as np
 from sklearn.decomposition import PCA
 import matplotlib as mpl
 
+np.set_printoptions(threshold=np.inf)
 def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state,
                key, actions, hippo_hidden, theta,
-               n_agents, bottleneck_size, replay_steps, height, width, visual_prob, temperature):
+               n_agents, bottleneck_size, replay_steps, height, width, visual_prob, temperature,
+               no_replay=False):
     # Input: actions_t-1, h_t-1, theta_t-1,
     obs, rewards, done, env_state = env.step(env_state, actions)  # todo: reset
     key, subkey = jax.random.split(key)
@@ -49,7 +51,8 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
     # replayed_hippo_hidden = jnp.where(rewards > 0, replayed_hippo_hidden, new_hippo_hidden)
     # fixme: not save replayed_hippo_hidden
     replayed_theta = jnp.where(rewards > 0, replayed_theta, theta)
-
+    if no_replay:
+        replayed_theta = theta
     # Take action ==================================================================================
     _, (policy, value, _) = policy_state.apply_fn({'params': policy_state.params},
                                                   replayed_theta, obs_embed, jnp.zeros_like(hippo_hidden))
@@ -103,7 +106,7 @@ def integrate(grid,goal_pos,hist_pos,hist_reward_pos):
     return trajectory
 
 ### reward位置不变
-def main(args,colormap='Set1'):
+def main(args,args2):
     key = jax.random.PRNGKey(0)
     key, subkey = jax.random.split(key)
     env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state =\
@@ -119,9 +122,9 @@ def main(args,colormap='Set1'):
     hist_actions = [[] for _ in range(args.n_agents)]
     hist_hippo = []
     reward_hippo = [[],[]]
-    # total_steps = np.ones((args.n_agents,2))
-    # total_steps[:,0] = 0
-    short_mid_reward_hippo = [[] for _ in range(args.n_agents)]
+    total_steps = []
+    # short_mid_reward_hippo = [[] for _ in range(args.n_agents)]
+    ### 短路径的mid-reward-replay和所有的mid-reward-replay没有明显区别
     # 0 for mid-path reward replay and 1 for goal replay
     
 
@@ -136,7 +139,8 @@ def main(args,colormap='Set1'):
             = model_step(env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state,
                          subkey, actions, hippo_hidden, theta,
                          args.n_agents, args.bottleneck_size, args.replay_steps, args.height, args.width,
-                         args.visual_prob, temperature=0.05)
+                         args.visual_prob, temperature=0.05,
+                         no_replay=args2.no_replay)
         
         replayed_hippo_history, replayed_theta_history, output_history = replayed_hippo_theta_output
         hist_hippo.append(replayed_hippo_history.reshape(-1,args.hidden_size))
@@ -151,7 +155,6 @@ def main(args,colormap='Set1'):
                 if rewards[n] == 0.5:
                     hist_reward_pos[n].append(jnp.array((reward_pos[n][0],reward_pos[n][1])))
                     reward_hippo[0].append(replayed_hippo_history[:,n,:])
-                    short_mid_reward_hippo[n].append(replayed_hippo_history[:,n,:])
                 else:
                     reward_hippo[1].append(replayed_hippo_history[:,n,:])
                 hist_replay_place[n].append(place[:,n]) # replay_step * hw
@@ -162,27 +165,25 @@ def main(args,colormap='Set1'):
                 hist_pos[n].append(env_state['goal_pos'][n])
 
                 state_traj = jnp.concatenate((jnp.stack(hist_pos[n],axis=0),jnp.stack(hist_actions[n],axis=0)),axis=1)
-                if len(hist_pos[n])-1 > 25:
-                    short_mid_reward_hippo[n] = []
+                total_steps.append(len(hist_pos[n])-1)
 
-                output_traj = False
-                if output_traj:
-                    fig,axis = plt.subplots(1,1)
+                if args2.output_traj:
                     if hist_reward_pos[n]:
                         reward_pos_traj = jnp.stack(hist_reward_pos[n],axis=0)
-                    if hist_replay_place[n] and hist_reward_pos[n]:
+                    if hist_replay_place[n] and (not args2.if_only_reward_trajectory \
+                        or (args2.if_only_reward_trajectory and hist_reward_pos[n])):
                         print('state and action traj')
                         print(state_traj)
-                        axis.set_title(f'{n}th agent, total_steps:{len(hist_pos[n])-1}')
-                        axis.grid()
-                        axis.plot(state_traj[:,0],state_traj[:,1])
+                        plt.title(f'{n}th agent, total_steps:{len(hist_pos[n])-1}')
+                        plt.grid()
+                        plt.plot(state_traj[:,0],state_traj[:,1])
 
                         print('replay traj')
                         for replay_output in hist_replay_place[n]:
-                            axis.plot(replay_output//10, replay_output%10, c='blue', marker='o', markersize=3)
+                            plt.plot(replay_output//10, replay_output%10, c='blue', marker='o', markersize=3)
                             print(jnp.stack((replay_output//10, replay_output%10),axis=-1))
-
-                        axis.scatter(reward_pos_traj[:,0],reward_pos_traj[:,1], marker='*', s=100, c='r')
+                        if reward_pos_traj != None:
+                            plt.scatter(reward_pos_traj[:,0],reward_pos_traj[:,1], marker='*', s=100, c='r')
                         plt.show()
                         plt.cla()
 
@@ -190,8 +191,9 @@ def main(args,colormap='Set1'):
                 hist_reward_pos[n] = []
                 hist_replay_place[n] = []
                 hist_actions[n] = [start_a]
+                reward_pos_traj = None
 
-        if ei%30==29:
+        if args2.output_dimension_reduction and ei%args2.epochs_per_output==args2.epochs_per_output-1:
             fig,[[ax0,ax1],[ax2,ax3]] = plt.subplots(2,2)
 ###用颜色标一下某个感兴趣变量会更清楚一些，比如用颜色区分初始位置，或者区分两种replay
             ax0.set_title('epoch '+str(ei)+' all hippo hidden')
@@ -200,16 +202,24 @@ def main(args,colormap='Set1'):
             
             ar_hist_hippo = pca.fit_transform(ar_hist_hippo)
             c_idx = np.arange(8).reshape(1,-1).repeat(ar_hist_hippo.shape[0]//args.replay_steps,0).reshape((-1,))
-            ax0.scatter(ar_hist_hippo[:,0],ar_hist_hippo[:,1],c=c_idx,cmap=colormap)
+            ax0.scatter(ar_hist_hippo[:,0],ar_hist_hippo[:,1],c=c_idx,cmap=args2.colormap)
 
 
-            ax1.set_title('epoch '+str(ei)+' all mid reward hidden')
+            ax1.set_title('epoch '+str(ei)+' mid reward hidden')
             if reward_hippo[0]:
                 mid_reward_hippo = np.concatenate(reward_hippo[0],axis=0)
+                # (replay_step*n_agent) * hidden_size
+                ### 这里画出来hiddenstate的histogram，没有什么有意义的结果，不是trivial的
+                # for i in range(6):
+                #     plt.subplot(2,3,i+1)
+                #     plt.hist(mid_reward_hippo[args.replay_steps*(i):args.replay_steps*(i+1),:])
+                #     plt.title('histogram of mid reward replay')
+                # plt.show()
+                # plt.cla()
                 mid_reward_hippo = pca.fit_transform(mid_reward_hippo)
                 # (replay_steps*n_agent*n_sample) * hidden_size
                 c_idx = np.arange(8).reshape(1,-1).repeat(mid_reward_hippo.shape[0]//args.replay_steps,0).reshape((-1,))
-                ax1.scatter(mid_reward_hippo[:,0],mid_reward_hippo[:,1],c=c_idx,cmap=colormap)
+                ax1.scatter(mid_reward_hippo[:,0],mid_reward_hippo[:,1],c=c_idx,cmap=args2.colormap)
 
             
             ax2.set_title('epoch '+str(ei)+' goal hidden')
@@ -218,7 +228,7 @@ def main(args,colormap='Set1'):
                 goal_hippo = pca.fit_transform(goal_hippo)
                 # (replay_steps*n_agent*n_sample) * hidden_size
                 c_idx = np.arange(8).reshape(1,-1).repeat(goal_hippo.shape[0]//args.replay_steps,0).reshape((-1,))
-                ax2.scatter(goal_hippo[:,0],goal_hippo[:,1],c=c_idx,cmap=colormap)
+                ax2.scatter(goal_hippo[:,0],goal_hippo[:,1],c=c_idx,cmap=args2.colormap)
 
             #此处不再总体地画出他们，因为它们已经很不一样了
             # plt.title('epoch '+str(ei)+' all reward hidden')
@@ -228,22 +238,27 @@ def main(args,colormap='Set1'):
             #     # (replay_steps*n_agent*n_sample) * hidden_size
             #     c_idx = np.arange(8).reshape(1,-1).repeat(all_reward_hippo.shape[0]//args.replay_steps,0).reshape((-1,))
             #     plt.scatter(all_reward_hippo[:,0],all_reward_hippo[:,1],c=c_idx,cmap='viridis')
-            ax3.set_title('epoch '+str(ei)+' short mid reward hidden')
-            if short_mid_reward_hippo:
-                ar_short = []
-                for agent_reward_list in short_mid_reward_hippo:
-                    if agent_reward_list:
-                        for mid_hippo in agent_reward_list:
-                            ar_short.append(mid_hippo)
-                ar_short = np.concatenate(ar_short,axis=0)
-                ar_short = pca.fit_transform(ar_short)
-                c_idx = np.arange(8).reshape(1,-1).repeat(ar_short.shape[0]//args.replay_steps,0).reshape((-1,))
-                ax3.scatter(ar_short[:,0],ar_short[:,1],c=c_idx,cmap=colormap)
-#检查一下这里的cmap有没有问题
-            cmap = eval('mpl.cm.'+colormap)
+            if args2.no_replay:
+                hist_name = 'epoch '+str(ei)+' histogram of total steps' + ' without replay'
+            else:
+                hist_name = 'epoch '+str(ei)+' histogram of total steps' + ' with replay'
+            ax3.set_title(hist_name)
+            # if short_mid_reward_hippo:
+            #     ar_short = []
+            #     for agent_reward_list in short_mid_reward_hippo:
+            #         if agent_reward_list:
+            #             for mid_hippo in agent_reward_list:
+            #                 ar_short.append(mid_hippo)
+            #     ar_short = np.concatenate(ar_short,axis=0)
+            #     ar_short = pca.fit_transform(ar_short)
+            #     c_idx = np.arange(8).reshape(1,-1).repeat(ar_short.shape[0]//args.replay_steps,0).reshape((-1,))
+            #     ax3.scatter(ar_short[:,0],ar_short[:,1],c=c_idx,cmap=colormap)
+            if total_steps:
+                ax3.hist(total_steps)
+
             # norm = mpl.colors.BoundaryNorm(np.arange(9), cmap.N, extend='neither')
             norm = mpl.colors.Normalize(vmin=0, vmax=7)
-            fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=colormap))
+            fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=args2.colormap))
             plt.show()
 
             
@@ -251,7 +266,15 @@ def main(args,colormap='Set1'):
 ### hippo_hidden_state UMAP降维
 ### 探索一下降维的意义，比如是否和agent的策略好坏有关，或者和reward奖励变化有关
 ### 阻断一下goal replay， 探索一下它为什么是6个
-### mid-reward replay为什么有两坨？有forward和reverse吗？
+### mid-reward replay目前的发现：分成两坨是奇数步和偶数步……还不清楚为什么
+### 看一下hippo具体的流形怎么样，具体来说是每一个step都画一张图
+### 按照位置标颜色
+### 记一下在奖励位置先后遇到奖励的replay
+### replay步数改一下
+### 测试时候阻断一下replay（已完成，replay有明显加速效果，没有replay的话agent会一直撞墙）
+### hidden_output 
+### theta降一下维
+
 
 ### hippocampus 吸引子
 
@@ -261,7 +284,15 @@ def main(args,colormap='Set1'):
 
 if __name__ == '__main__':
     args = train.parse_args()
+    parser2 = argparse.ArgumentParser()
+    parser2.add_argument('--colormap', type=str, default='Set1')
+    parser2.add_argument('--output_traj', type=bool, default=True)
+    parser2.add_argument('--if_only_reward_trajectory', type=bool, default=False)
+    parser2.add_argument('--output_dimension_reduction', type=bool, default=False)
+    parser2.add_argument('--epochs_per_output', type=int, default=30)
+    parser2.add_argument('--no_replay', type=bool, default=True)
 
-    main(args,colormap='Set2')
+    args2 = parser2.parse_args()
+    main(args,args2)
     
     
