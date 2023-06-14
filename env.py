@@ -68,7 +68,7 @@ def take_action(actions, current_pos, grid, goal_pos):
     hit = jax.vmap(fetch_pos, (0, 0), 0)(grid, next_pos)
     hit = hit.reshape((-1, 1))
     blocked = jnp.where(hit == 1, -1, 0)
-    rewarded = jnp.where(hit == 2, 2, 0)
+    rewarded = jnp.where(hit == 2, 0.5, 0)
 
     rewards = jnp.where(jnp.all(next_pos == goal_pos, axis=1, keepdims=True), 1, 0) + blocked + rewarded
     done = jnp.all(next_pos == goal_pos, axis=1)

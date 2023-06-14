@@ -262,23 +262,24 @@ def main(args,args2):
             plt.show()
 
             
-
+### 把hippo_output的heatmap画出来，而不是只有argmax
 ### hippo_hidden_state UMAP降维
-### 探索一下降维的意义，比如是否和agent的策略好坏有关，或者和reward奖励变化有关
+### （已完成：和agent几步走到终点没关系）探索一下降维的意义，比如是否和agent的策略好坏有关
 ### 阻断一下goal replay， 探索一下它为什么是6个
 ### mid-reward replay目前的发现：分成两坨是奇数步和偶数步……还不清楚为什么
 ### 看一下hippo具体的流形怎么样，具体来说是每一个step都画一张图
-### 按照位置标颜色
-### 记一下在奖励位置先后遇到奖励的replay
+### 按照位置标颜色，而不是按照具体是replay的哪一步
+### 记一下在奖励位置先后遇到两次奖励的replay，看看位置变化会不会引起replay变化
+### 上边这个重点是关注同一个agent在两次episode之间的策略变化，后边重点关注一下这个
 ### replay步数改一下
-### 测试时候阻断一下replay（已完成，replay有明显加速效果，没有replay的话agent会一直撞墙）
-### hidden_output 
+### （已完成，replay有明显加速效果，没有replay的话agent会一直撞墙）测试时候阻断一下replay
+### hidden_output
 ### theta降一下维
 
 
 ### hippocampus 吸引子
 
-### reward 调成2看一下来回走
+### （ing）reward 调成2看一下来回走
 ## checkpoint 
 ### 障碍物
 

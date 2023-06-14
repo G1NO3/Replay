@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument('--save_name', type=str, default='train0')
     parser.add_argument('--model_path', type=str, default='./modelzoo')
 
-    parser.add_argument('--replay_steps', type=int, default=8)  # todo: tune
+    parser.add_argument('--replay_steps', type=int, default=4)  # todo: tune
 
     parser.add_argument('--gamma', type=float, default=0.95)
     parser.add_argument('--clip_param', type=float, default=0.2)
@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument('--visual_prob', type=float, default=0.05)
     parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/checkpoint_995000')  # todo: checkpoint
     parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/checkpoint_995000')
-    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_input_policy995001')
+    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_input_policy_normal995001')
 
     parser.add_argument('--hidden_size', type=int, default=128)
     args = parser.parse_args()

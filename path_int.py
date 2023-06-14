@@ -176,6 +176,7 @@ def prepare_batch(rollouts, place_cell_state):
     batch['place_cells'] = jax.vmap(generate_place_cell, (None, None, 0), 0)(place_cell_state['centers'],
                                                                              place_cell_state['sigma'],
                                                                              rollouts[2])
+    # t * n * m
     batch['rewards'] = rollouts[3]
     return batch
 
