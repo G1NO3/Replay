@@ -56,7 +56,7 @@ def prepare_obs(grid, current_pos):
 
 
 @jax.jit
-def take_action(actions, current_pos, grid, goal_pos):
+def take_action(actions, current_pos, grid, goal_pos, mid_reward):
     next_pos = jnp.where(actions == 0, current_pos - jnp.array([1, 0]),
                          jnp.where(actions == 1, current_pos + jnp.array([0, 1]),
                                    jnp.where(actions == 2, current_pos + jnp.array([1, 0]),
@@ -68,14 +68,14 @@ def take_action(actions, current_pos, grid, goal_pos):
     hit = jax.vmap(fetch_pos, (0, 0), 0)(grid, next_pos)
     hit = hit.reshape((-1, 1))
     blocked = jnp.where(hit == 1, -1, 0)
-    rewarded = jnp.where(hit == 2, 0.5, 0)
+    rewarded = jnp.where(hit == 2, mid_reward, 0)
 
     rewards = jnp.where(jnp.all(next_pos == goal_pos, axis=1, keepdims=True), 1, 0) + blocked + rewarded
     done = jnp.all(next_pos == goal_pos, axis=1)
     return next_pos, rewards, done, blocked
 
 
-def reset(width, height, n_agents, key):
+def reset(width, height, n_agents, mid_reward, key):
     grid = jnp.zeros((n_agents, height, width), dtype=jnp.int8)
     grid = add_obstacle(grid, [[] for _ in range(n_agents)], n_agents)
     # fixme: no obstacles now; so add_obstacle is not checked
@@ -86,14 +86,15 @@ def reset(width, height, n_agents, key):
     current_pos = start_pos
 
     return prepare_obs(grid, current_pos), {'grid': grid, 'current_pos': current_pos,
-                                            'goal_pos': goal_pos}
+                                            'goal_pos': goal_pos, 'mid_reward': mid_reward}
 
 
 @jax.jit
 def step(env_state, actions):
     next_pos, rewards, done, blocked = take_action(actions,
                                                    env_state['current_pos'], env_state['grid'],
-                                                   env_state['goal_pos'])
+                                                   env_state['goal_pos'],
+                                                   env_state['mid_reward'])
     current_pos = jnp.where(blocked == -1, env_state['current_pos'], next_pos)
     current_pos = jnp.where(done.reshape(-1, 1), jnp.zeros_like(current_pos), current_pos)
     # fixme: reset pos to zero(start point) as soon as goal is reached
