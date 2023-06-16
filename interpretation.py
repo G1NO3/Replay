@@ -350,31 +350,29 @@ def main(args):
                     comparison_pts = comparison_pts.at[n].add(args.pics_per_output)
                     print(comparison_pts[n])
 
-
-
             
-### （已完成，基本没什么区别）把hippo_output的heatmap画出来，而不是只有argmax
-### hippo_hidden_state UMAP降维
-### （已完成：和agent几步走到终点没关系）探索一下降维的意义，比如是否和agent的策略好坏有关
-### （阻断之后）阻断一下goal replay， 探索一下它为什么是6个
+# （已完成，基本没什么区别）把hippo_output的heatmap画出来，而不是只有argmax
+# hippo_hidden_state UMAP降维
+# （已完成：和agent几步走到终点没关系）探索一下降维的意义，比如是否和agent的策略好坏有关
+# （已完成阻断之后速度减慢并且奖励略有减少）阻断一下goal replay， 探索一下它为什么是6个
 
-### （ing）mid-reward replay目前的发现：分成两坨是奇数步和偶数步……还不清楚为什么
-# 进一步的发现：在huge_reward中mid结构更加明显，是一步一步的扩散行为，goal结构更乱
-# 但在small_reward中，mid分成两坨（无论是replay_steps==4 or 8），goal明显只有六个部分
+# （ing）mid-reward replay目前的发现：分成两坨是奇数步和偶数步……还不清楚为什么
+### 进一步的发现：在huge_reward中mid结构更加明显，是一步一步的扩散行为，goal结构更乱
+### 但在small_reward中，mid分成两坨（无论是replay_steps==4 or 8），goal明显只有六个部分
 
-### （已完成，当reward很大的时候可以看出明显结构）看一下hippo具体的流形怎么样，具体来说是每一个step都画一张图
-### 按照位置标颜色，而不是按照具体是replay的哪一步
-### （已完成，但agent不太会根据上一次奖励在哪里来规划下一步动作……不知道replay的意义是什么）记一下在奖励位置先后遇到两次奖励的replay，看看位置变化会不会引起replay变化
-# 上边这个重点是关注同一个agent在两次episode之间的策略变化，后边重点关注一下这个
-### （已完成，当replay步数减少到4的时候，模型只能replay两步，基本流形和8一样，但reward改变会使得replay更加激进，结构更加明显）replay步数改一下
-### （已完成，replay有明显加速效果，没有replay的话agent会一直撞墙）测试时候阻断一下replay
-### hidden_output
-### theta降一下维
+# （已完成，当reward很大的时候可以看出明显结构）看一下hippo具体的流形怎么样，具体来说是每一个step都画一张图
+# 按照位置标颜色，而不是按照具体是replay的哪一步
+# （已完成但存疑，但agent不太会根据上一次奖励在哪里来规划下一步动作……不知道replay的意义是什么）记一下在奖励位置先后遇到两次奖励的replay，看看位置变化会不会引起replay变化
+### 上边这个重点是关注同一个agent在两次episode之间的策略变化，后边重点关注一下这个
+# （已完成，当replay步数减少到4的时候，模型只能replay两步，基本流形和8一样，但reward改变会使得replay更加激进，结构更加明显）replay步数改一下
+# （已完成，replay有明显加速效果，没有replay的话agent会一直撞墙）测试时候阻断一下replay
+# hidden_output
+# theta降一下维
 
 
 ### hippocampus 吸引子
 
-### （已完成，有一些agent学会了来回走，但大多数agent更加激进）reward 调成2看一下来回走
+# （已完成，有一些agent学会了来回走，但大多数agent的replay策略更加激进，感觉reward随机改变的概率还是太高？）reward 调成2看一下来回走
 ## checkpoint 
 ### 障碍物
 
