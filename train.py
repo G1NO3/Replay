@@ -31,6 +31,7 @@ def parse_args():
     parser.add_argument('--save_name', type=str, default='train0')
     parser.add_argument('--model_path', type=str, default='./modelzoo')
 
+    parser.add_argument('--mid_reward', type=float, default=4)
     parser.add_argument('--replay_steps', type=int, default=8)  # todo: tune
 
     parser.add_argument('--gamma', type=float, default=0.95)
