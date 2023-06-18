@@ -216,7 +216,7 @@ def main(config):
     key = jax.random.PRNGKey(0)
     # Initialize env and place_cell ================================================
     key, subkey = jax.random.split(key)
-    obs, env_state = env.reset(config.width, config.height, config.n_agents, subkey)
+    obs, env_state = env.reset(config.width, config.height, config.n_agents, config.mid_reward, subkey)
     key, subkey = jax.random.split(key)
     actions = jax.random.randint(subkey, (config.n_agents, 1), minval=0, maxval=4)  # [n, 1]
     obs, rewards, done, env_state = env.step(env_state, actions)

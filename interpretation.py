@@ -224,7 +224,6 @@ def plot_dimension_reduction_and_replay(ei:int, dimred_replay:dict, args):
     # norm = mpl.colors.BoundaryNorm(np.arange(args.replay_steps+1), cmap.N, extend='neither')
     norm = mpl.colors.Normalize(vmin=0, vmax=args.replay_steps)
     fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=new_cmap))
-    plt.show()
 
 
 ### reward位置不变
@@ -333,7 +332,9 @@ def main(args):
         if args.output_dimension_reduction and ei%args.epochs_per_output==args.epochs_per_output-1:
             dimred_replay = {'hist_hippo':hist_hippo, 'reward_hippo':reward_hippo, 'total_steps':total_steps,\
                  'total_reward':total_reward, 'total_replay_distance_scope':total_replay_distance_scope}
-            plot_dimension_reduction_and_replay(ei, dimred_replay)
+            plot_dimension_reduction_and_replay(ei, dimred_replay, args)
+            plt.show()
+            plt.cla()
         
         if args.output_comparison:
             for n in range(args.n_agents):
@@ -389,7 +390,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_name', type=str, default='train0')
     parser.add_argument('--model_path', type=str, default='./modelzoo')
 
-    parser.add_argument('--mid_reward', type=float, default=2)
+    parser.add_argument('--mid_reward', type=float, default=4)
     parser.add_argument('--replay_steps', type=int, default=8)  # todo: tune
 
     parser.add_argument('--gamma', type=float, default=0.95)
@@ -405,7 +406,7 @@ if __name__ == '__main__':
     parser.add_argument('--visual_prob', type=float, default=0.05)
     parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/checkpoint_995000')  # todo: checkpoint
     parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/checkpoint_995000')
-    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_huge_reward995001')
+    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_reward4replay8_995001')
     parser.add_argument('--hidden_size', type=int, default=128)
 
     # visualization
@@ -413,14 +414,14 @@ if __name__ == '__main__':
     parser.add_argument('--output_traj', action='store_true', default=False)
     parser.add_argument('--only_reward_trajectory', action='store_true' ,default=False)
     parser.add_argument('--output_dimension_reduction', action='store_true', default=False)
-    parser.add_argument('--epochs_per_output', type=int, default=90,
+    parser.add_argument('--epochs_per_output', type=int, default=30,
                         help='how many epochs before output of dimension reduction')
     parser.add_argument('--no_replay', action='store_true', default=False)
     parser.add_argument('--no_goal_replay', action='store_true', default=False)
     parser.add_argument('--output_heatmap', action='store_true', default=False)
-    parser.add_argument('--output_comparison', action='store_true', default=True,
+    parser.add_argument('--output_comparison', action='store_true', default=False,
                         help='whether to output continuous trajectories of one agent')
-    parser.add_argument('--pics_per_output',type=int, default=2,
+    parser.add_argument('--pics_per_output',type=int, default=6,
                         help='how many trajectories to be showed of one agent in output')
 
 

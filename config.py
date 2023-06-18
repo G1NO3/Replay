@@ -8,7 +8,7 @@ height = 10
 n_agents = 1024  # batch_size
 sigma = 2.  # the std of place cell
 visual_prob = 0.05  # the prob that obs is not masked to zero
-
+mid_reward = 2.  # the reward at the middle
 # network
 hidden_size = 128  # hidden_size of hippo campus state
 bottleneck_size = 8  # the dim of pfc's input to hippo
