@@ -231,7 +231,7 @@ def main(args):
     key = jax.random.PRNGKey(0)
     key, subkey = jax.random.split(key)
     env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state =\
-         train.init_states(args, subkey, random_reset=False)
+         train.init_states(args, subkey, random_reset=True)
     actions = jnp.zeros((args.n_agents, 1), dtype=jnp.int32)
     hippo_hidden = jnp.zeros((args.n_agents, args.hidden_size))
     theta = jnp.zeros((args.n_agents, args.hidden_size))
@@ -390,7 +390,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_name', type=str, default='train0')
     parser.add_argument('--model_path', type=str, default='./modelzoo')
 
-    parser.add_argument('--mid_reward', type=float, default=4)
+    parser.add_argument('--mid_reward', type=float, default=2)
     parser.add_argument('--replay_steps', type=int, default=8)  # todo: tune
 
     parser.add_argument('--gamma', type=float, default=0.95)
@@ -406,22 +406,22 @@ if __name__ == '__main__':
     parser.add_argument('--visual_prob', type=float, default=0.05)
     parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/checkpoint_995000')  # todo: checkpoint
     parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/checkpoint_995000')
-    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_reward4replay8_995001')
+    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_reward2_hippo_retrain')
     parser.add_argument('--hidden_size', type=int, default=128)
 
     # visualization
     parser.add_argument('--colormap', type=str, default='Set1')
-    parser.add_argument('--output_traj', action='store_true', default=False)
-    parser.add_argument('--only_reward_trajectory', action='store_true' ,default=False)
-    parser.add_argument('--output_dimension_reduction', action='store_true', default=False)
+    parser.add_argument('--output_traj', '-a', action='store_true', default=False)
+    parser.add_argument('--only_reward_trajectory', '-r', action='store_true' ,default=False)
+    parser.add_argument('--output_dimension_reduction', '-d', action='store_true', default=False)
     parser.add_argument('--epochs_per_output', type=int, default=30,
                         help='how many epochs before output of dimension reduction')
     parser.add_argument('--no_replay', action='store_true', default=False)
     parser.add_argument('--no_goal_replay', action='store_true', default=False)
     parser.add_argument('--output_heatmap', action='store_true', default=False)
-    parser.add_argument('--output_comparison', action='store_true', default=False,
+    parser.add_argument('--output_comparison', '-c', action='store_true', default=False,
                         help='whether to output continuous trajectories of one agent')
-    parser.add_argument('--pics_per_output',type=int, default=6,
+    parser.add_argument('--pics_per_output',type=int, default=4,
                         help='how many trajectories to be showed of one agent in output')
 
 
@@ -429,3 +429,6 @@ if __name__ == '__main__':
     main(args)
     
     
+### 不要定义成policy network，因为既有memory consolidation也有planning
+### hippo 和 encoder 统一在一起
+### 不要分步训练，看看replay会不会有什么变化

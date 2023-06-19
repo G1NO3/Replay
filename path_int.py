@@ -108,11 +108,11 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
         rewards_label = batch['rewards'][1:]
         loss_last = jnp.abs(preds_rewards[:-1] - rewards_label)  # [t-1, n, 1]
         loss_last = jnp.where(rewards_label > 0.4, loss_last * 20, loss_last)  # fixme: weighted loss
-        acc_last = jnp.where((loss_last < 0.1) & (rewards_label == 0.5), 1, 0)
+        acc_last = jnp.where((loss_last < 0.1) & (jnp.abs(rewards_label-config.mid_reward)<1e-5), 1, 0)
         consider_last_flag = jnp.cumsum(rewards_label, axis=0) > 0.6
         loss_last = jnp.where(consider_last_flag, loss_last, 0).mean()
         acc_last = jnp.where(consider_last_flag, acc_last, 0).sum() \
-                   / jnp.where((rewards_label == 0.5) & consider_last_flag, 1, 0).sum()
+                   / jnp.where(jnp.abs(rewards_label-config.mid_reward)<1e-5 & consider_last_flag, 1, 0).sum()
         # fixme: cumsum_rewards > 0.6, considering random reward value is 0.5, > 0.6 means the second time met a reward
 
         loss = loss_pred + loss_last

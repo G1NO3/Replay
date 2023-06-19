@@ -6,7 +6,7 @@ Config for path_int.py
 width = 10
 height = 10
 n_agents = 1024  # batch_size
-sigma = 2.  # the std of place cell
+sigma = 1.  # the std of place cell
 visual_prob = 0.05  # the prob that obs is not masked to zero
 mid_reward = 2.  # the reward at the middle
 # network
