@@ -101,7 +101,7 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
         _, all_preds = jax.lax.scan(apply_fn, hiddens, [batch['obs'], batch['action'], batch['rewards']])
         preds_place = all_preds[:, :, :num_cells]
         preds_rewards = all_preds[:, :, num_cells:num_cells+num_rewards]  # [t, n, 1]
-        preds_reward_distance = all_preds[:, :, num_cells+num_rewards:] # [t, n, 2]
+        preds_reward_distance = all_preds[:, :, num_cells+num_rewards:] # [t, n, 1]
         loss_pred = optax.softmax_cross_entropy(preds_place, batch['place_cells']).mean()
         acc_pred = (jnp.argmax(all_preds, axis=-1)
                     == jnp.argmax(batch['place_cells'], axis=-1)).astype(jnp.float32).mean()
@@ -117,8 +117,8 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
                    / jnp.where(jnp.abs(rewards_label-config.mid_reward)<1e-5 & consider_last_flag, 1, 0).sum()
         # fixme: cumsum_rewards > 0.6, considering random reward value is 0.5, > 0.6 means the second time met a reward
 
-        loss_dist = jnp.abs(preds_reward_distance - batch['reward_distance']).mean()
-        acc_dist = jnp.where((jnp.abs(preds_reward_distance - batch['reward_distance']) < 0.05), 1, 0).astype(jnp.float32).mean()
+        loss_dist = jnp.abs(preds_reward_distance - batch['reward_distance_coding']).mean()
+        acc_dist = jnp.where((jnp.abs(preds_reward_distance - batch['reward_distance_coding']) < 0.05), 1, 0).astype(jnp.float32).mean()
         loss = loss_pred + loss_last + loss_dist
         return loss, (loss_last, loss_pred, loss_dist, acc_last, acc_pred, acc_dist)
 
@@ -171,15 +171,20 @@ def sample_from_buffer(buffer_state, sample_len, key):
 
     # return rollout
 
-@jax.jit
-def calculate_position_coding(current_pos, reward_pos, goal_pos):
+# @jax.jit
+def calculate_distance_coding(current_pos, reward_pos, goal_pos, mid_reward, reward_distance_ratio):
     # [t, n, 2], [t, n, 2], [t, n, 2]
+    print('current_pos', current_pos.shape)
+    print('reward_pos', reward_pos.shape)
+    print('goal_pos', goal_pos.shape)
     mid_distance = ((current_pos - reward_pos)**2).sum(axis=-1)**0.5
     goal_distance = ((current_pos - goal_pos)**2).sum(axis=-1)**0.5
-    return jnp.stack((mid_distance, goal_distance), axis=-1) #[n, 2]
+    distance_coding = jnp.exp(-mid_distance/reward_distance_ratio)*mid_reward + \
+                        jnp.exp(-goal_distance/reward_distance_ratio)*1.
+    return distance_coding #[n, 1]
 
 ### to be finished
-def prepare_batch(rollouts, place_cell_state):
+def prepare_batch(rollouts, place_cell_state, config):
     # obs [t, n, h, w], actions[t, n, 1], pos[t, n, 2], rewards[t, n, 1], reward_pos[t, n, 2]
     batch = dict()
     batch['obs'] = rollouts[0]
@@ -187,7 +192,9 @@ def prepare_batch(rollouts, place_cell_state):
     batch['place_cells'] = jax.vmap(generate_place_cell, (None, None, 0), 0)(place_cell_state['centers'],
                                                                              place_cell_state['sigma'],
                                                                              rollouts[2])
-    batch['reward_distance'] = jax.vmap(calculate_position_coding, (0, 0, 0), 0)(rollouts[2],
+    cal_dist_coding = partial(calculate_distance_coding, mid_reward=config.mid_reward,
+                                reward_distance_ratio=config.reward_distance_ratio)
+    batch['reward_distance_coding'] = jax.vmap(cal_dist_coding, (0, 0, 0), 0)(rollouts[2],
                                                                             rollouts[4],
                                                                             rollouts[5])
     # t * n * m
@@ -207,12 +214,12 @@ def mask_obs(obs, key, sample_len, n_agent, visual_prob):
 
 @partial(jax.jit, static_argnums=(5, 6, 7, 8, 9))
 def a_loop(key, buffer_states, place_cell_state, running_encoder_state, running_hippo_state,
-           sample_len, n_agents, visual_prob, hidden_size, bottleneck_size):
+           sample_len, n_agents, visual_prob, hidden_size, bottleneck_size, config):
     # get from buffer, train_step()
     key, subkey = jax.random.split(key)
     rollouts = sample_from_buffer(buffer_states, sample_len, subkey)
     # print(ei, len(rollouts))
-    batch = prepare_batch(rollouts, place_cell_state)
+    batch = prepare_batch(rollouts, place_cell_state, config)
     batch['obs'] = mask_obs(batch['obs'], key,
                             sample_len, n_agents, visual_prob)
     # print(batch['place_cells'].reshape((-1, 100)).std(axis=0).mean(), 'place cell std')
@@ -268,7 +275,7 @@ def main(config):
                 a_loop(key, buffer_states, place_cell_state, running_encoder_state, running_hippo_state,
                        sample_len=config.sample_len, n_agents=config.n_agents,
                        visual_prob=config.visual_prob, hidden_size=config.hidden_size,
-                       bottleneck_size=config.bottleneck_size)
+                       bottleneck_size=config.bottleneck_size, config=config)
 
         if ei % 100 == 0 and ei > config.max_size:
             for k, v in running_encoder_state.metrics.compute().items():

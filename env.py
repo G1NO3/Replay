@@ -32,7 +32,7 @@ def add_reward(grid, key, n_agents, height, width):
     # fixme: one reward for each env
     for na in range(n_agents):
         grid = grid.at[na, reward_x[na], reward_y[na]].set(2)
-    return grid, jnp.array((reward_x, reward_y))
+    return grid, jnp.stack((reward_x, reward_y),axis=-1)
 
 
 @jax.jit
