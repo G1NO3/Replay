@@ -110,11 +110,11 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
         rewards_label = batch['rewards'][1:]
         loss_last = jnp.abs(preds_rewards[:-1] - rewards_label)  # [t-1, n, 1]
         loss_last = jnp.where(rewards_label > 0.4, loss_last * 20, loss_last)  # fixme: weighted loss
-        acc_last = jnp.where((loss_last < 0.1) & (jnp.abs(rewards_label-config.mid_reward)<1e-5), 1, 0)
+        acc_last = jnp.where((loss_last < 0.1) & jnp.isclose(rewards_label, config.mid_reward), 1, 0)
         consider_last_flag = jnp.cumsum(rewards_label, axis=0) > 0.6
         loss_last = jnp.where(consider_last_flag, loss_last, 0).mean()
         acc_last = jnp.where(consider_last_flag, acc_last, 0).sum() \
-                   / jnp.where(jnp.abs(rewards_label-config.mid_reward)<1e-5 & consider_last_flag, 1, 0).sum()
+                   / jnp.where(jnp.isclose(rewards_label, config.mid_reward) & consider_last_flag, 1, 0).sum()
         # fixme: cumsum_rewards > 0.6, considering random reward value is 0.5, > 0.6 means the second time met a reward
 
         loss_dist = jnp.abs(preds_reward_distance - batch['reward_distance_coding']).mean()
@@ -174,17 +174,14 @@ def sample_from_buffer(buffer_state, sample_len, key):
 # @jax.jit
 def calculate_distance_coding(current_pos, reward_pos, goal_pos, mid_reward, reward_distance_ratio):
     # [t, n, 2], [t, n, 2], [t, n, 2]
-    print('current_pos', current_pos.shape)
-    print('reward_pos', reward_pos.shape)
-    print('goal_pos', goal_pos.shape)
-    mid_distance = ((current_pos - reward_pos)**2).sum(axis=-1)**0.5
-    goal_distance = ((current_pos - goal_pos)**2).sum(axis=-1)**0.5
+    mid_distance = ((current_pos - reward_pos)**2).sum(axis=-1,keepdims=True)**0.5
+    goal_distance = ((current_pos - goal_pos)**2).sum(axis=-1,keepdims=True)**0.5
     distance_coding = jnp.exp(-mid_distance/reward_distance_ratio)*mid_reward + \
                         jnp.exp(-goal_distance/reward_distance_ratio)*1.
     return distance_coding #[n, 1]
 
 ### to be finished
-def prepare_batch(rollouts, place_cell_state, config):
+def prepare_batch(rollouts, place_cell_state, mid_reward, reward_distance_ratio):
     # obs [t, n, h, w], actions[t, n, 1], pos[t, n, 2], rewards[t, n, 1], reward_pos[t, n, 2]
     batch = dict()
     batch['obs'] = rollouts[0]
@@ -192,8 +189,8 @@ def prepare_batch(rollouts, place_cell_state, config):
     batch['place_cells'] = jax.vmap(generate_place_cell, (None, None, 0), 0)(place_cell_state['centers'],
                                                                              place_cell_state['sigma'],
                                                                              rollouts[2])
-    cal_dist_coding = partial(calculate_distance_coding, mid_reward=config.mid_reward,
-                                reward_distance_ratio=config.reward_distance_ratio)
+    cal_dist_coding = partial(calculate_distance_coding, mid_reward=mid_reward,
+                                reward_distance_ratio=reward_distance_ratio)
     batch['reward_distance_coding'] = jax.vmap(cal_dist_coding, (0, 0, 0), 0)(rollouts[2],
                                                                             rollouts[4],
                                                                             rollouts[5])
@@ -214,12 +211,12 @@ def mask_obs(obs, key, sample_len, n_agent, visual_prob):
 
 @partial(jax.jit, static_argnums=(5, 6, 7, 8, 9))
 def a_loop(key, buffer_states, place_cell_state, running_encoder_state, running_hippo_state,
-           sample_len, n_agents, visual_prob, hidden_size, bottleneck_size, config):
+           sample_len, n_agents, visual_prob, hidden_size, bottleneck_size, mid_reward, reward_distance_ratio):
     # get from buffer, train_step()
     key, subkey = jax.random.split(key)
     rollouts = sample_from_buffer(buffer_states, sample_len, subkey)
     # print(ei, len(rollouts))
-    batch = prepare_batch(rollouts, place_cell_state, config)
+    batch = prepare_batch(rollouts, place_cell_state, mid_reward, reward_distance_ratio)
     batch['obs'] = mask_obs(batch['obs'], key,
                             sample_len, n_agents, visual_prob)
     # print(batch['place_cells'].reshape((-1, 100)).std(axis=0).mean(), 'place cell std')
@@ -245,7 +242,7 @@ def main(config):
     place_cell_state = create_place_cell_state(config.sigma, config.width, config.height)
     # Initialize model and training_state ============================
     encoder = Encoder()
-    hippo = Hippo(output_size=place_cell_state['centers'].shape[0] + 3,
+    hippo = Hippo(output_size=place_cell_state['centers'].shape[0] + 2,
                   hidden_size=config.hidden_size)
     key, subkey = jax.random.split(key)
     running_encoder_state, running_hippo_state = create_train_state(encoder, hippo, subkey,
@@ -275,7 +272,8 @@ def main(config):
                 a_loop(key, buffer_states, place_cell_state, running_encoder_state, running_hippo_state,
                        sample_len=config.sample_len, n_agents=config.n_agents,
                        visual_prob=config.visual_prob, hidden_size=config.hidden_size,
-                       bottleneck_size=config.bottleneck_size, config=config)
+                       bottleneck_size=config.bottleneck_size, mid_reward=config.mid_reward, 
+                       reward_distance_ratio=config.reward_distance_ratio)
 
         if ei % 100 == 0 and ei > config.max_size:
             for k, v in running_encoder_state.metrics.compute().items():

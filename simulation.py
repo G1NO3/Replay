@@ -59,6 +59,5 @@ import matplotlib as mpl
 # fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=newcmap))
 # plt.show()
 a = jnp.zeros(4,dtype=jnp.int32)
-for i in range(3):
-    a.at[i].add(i)
-print(a)
+b = 1e-9
+print(jnp.isclose(a,b))
