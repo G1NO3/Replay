@@ -16,7 +16,7 @@ bottleneck_size = 8  # the dim of pfc's input to hippo
 # optimizer
 lr = 5e-4
 wd = 1e-3
-epoch = int(1e6)
+epoch = int(1e7)
 train_every = 8
 sample_len = 256
 

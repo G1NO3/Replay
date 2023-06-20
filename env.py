@@ -32,7 +32,7 @@ def add_reward(grid, key, n_agents, height, width):
     # fixme: one reward for each env
     for na in range(n_agents):
         grid = grid.at[na, reward_x[na], reward_y[na]].set(2)
-    return grid
+    return grid, jnp.array((reward_x, reward_y))
 
 
 @jax.jit
@@ -80,13 +80,14 @@ def reset(width, height, n_agents, mid_reward, key):
     grid = add_obstacle(grid, [[] for _ in range(n_agents)], n_agents)
     # fixme: no obstacles now; so add_obstacle is not checked
     # fixme: magic number: 0 for pathway, 1 for obstacle, 2 for reward, 3 for self pos
-    grid = add_reward(grid, key, n_agents, height, width)  
+    grid, reward_pos = add_reward(grid, key, n_agents, height, width)  
     start_pos = jnp.array([[0, 0]] * n_agents)
     goal_pos = jnp.array([[height - 1, width - 1]] * n_agents)
     current_pos = start_pos
 
     return prepare_obs(grid, current_pos), {'grid': grid, 'current_pos': current_pos,
-                                            'goal_pos': goal_pos, 'mid_reward': mid_reward}
+                                            'goal_pos': goal_pos, 'mid_reward': mid_reward,
+                                            'reward_pos': reward_pos}
 
 
 @jax.jit
@@ -111,9 +112,9 @@ def reset_reward(env_state, rewards, key):
     reset_flag = jax.random.uniform(subkey, (rewards.shape[0], 1, 1)) < 0.1
     new_grid = jnp.where((rewards.reshape((-1, 1, 1)) > 0) & reset_flag, 0, env_state['grid'])
     # fixme: if reward, set grid to 0 (no obstacles)
-    new_grid = add_reward(new_grid, key, *env_state['grid'].shape)
+    new_grid, new_reward_pos = add_reward(new_grid, key, *env_state['grid'].shape)
     new_grid = jnp.where((rewards.reshape((-1, 1, 1)) > 0) & reset_flag, new_grid, env_state['grid'])
-    env_state = dict(env_state, grid=new_grid)
+    env_state = dict(env_state, grid=new_grid, reward_pos=new_reward_pos)
 
     return env_state
 

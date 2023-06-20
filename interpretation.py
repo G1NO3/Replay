@@ -231,7 +231,7 @@ def main(args):
     key = jax.random.PRNGKey(0)
     key, subkey = jax.random.split(key)
     env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state =\
-         train.init_states(args, subkey, random_reset=True)
+         train.init_states(args, subkey, random_reset=False)
     actions = jnp.zeros((args.n_agents, 1), dtype=jnp.int32)
     hippo_hidden = jnp.zeros((args.n_agents, args.hidden_size))
     theta = jnp.zeros((args.n_agents, args.hidden_size))
@@ -404,8 +404,8 @@ if __name__ == '__main__':
     parser.add_argument('--height', type=int, default=10)
     parser.add_argument('--n_action', type=int, default=4)
     parser.add_argument('--visual_prob', type=float, default=0.05)
-    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/checkpoint_995000')  # todo: checkpoint
-    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/checkpoint_995000')
+    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/r_input_encoder_reward2')  # todo: checkpoint
+    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/r_input_hippo_reward2')
     parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_reward2_hippo_retrain')
     parser.add_argument('--hidden_size', type=int, default=128)
 
@@ -432,3 +432,7 @@ if __name__ == '__main__':
 ### 不要定义成policy network，因为既有memory consolidation也有planning
 ### hippo 和 encoder 统一在一起
 ### 不要分步训练，看看replay会不会有什么变化
+
+
+### 改一下reward的平均方法，让它对每一次episode做平均
+### 改一下hippo的position coding...

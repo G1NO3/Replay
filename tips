@@ -25,7 +25,7 @@ dimensions = {'obs':144, 'theta':128, 'hippo_hidden':128, 'bottleneck_size':8, '
 
 Path_int.py
 buffer_states = {'buffer': buffer, 'insert_pos': jnp.array(insert_pos), 'max_size': jnp.array(max_size)}
-init_sample_for_buffer=[obs, actions, env_state['current_pos'], rewards]
+init_sample_for_buffer=[obs, actions, env_state['current_pos'], rewards, env_state['reward_pos'], env_state['goal_pos']]
 batch_in_path_int = 
-    {'obs':[t, n, h, w], 'action':[t, n, 1], 'place_cells':[t, n, 2], 'rewards':[t, n, 1]}
+    {'obs':[t, n, h, w], 'action':[t, n, 1], 'place_cells':[t, n, 2], 'rewards':[t, n, 1], 'reward_distance':[t, n, 2]}
 t是强制规定的采样长度
