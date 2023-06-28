@@ -404,14 +404,14 @@ if __name__ == '__main__':
     parser.add_argument('--height', type=int, default=10)
     parser.add_argument('--n_action', type=int, default=4)
     parser.add_argument('--visual_prob', type=float, default=0.05)
-    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/r_input_encoder_reward2')  # todo: checkpoint
-    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/r_input_hippo_reward2')
-    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_reward2_hippo_retrain')
+    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/reward2_pos_cod_checkpoint_9995000')  # todo: checkpoint
+    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/reward2_pos_cod_checkpoint_9995000')
+    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_reward2_pos_cod_995001')
     parser.add_argument('--hidden_size', type=int, default=128)
 
     # visualization
     parser.add_argument('--colormap', type=str, default='Set1')
-    parser.add_argument('--output_traj', '-a', action='store_true', default=False)
+    parser.add_argument('--output_traj', '-t', action='store_true', default=False)
     parser.add_argument('--only_reward_trajectory', '-r', action='store_true' ,default=False)
     parser.add_argument('--output_dimension_reduction', '-d', action='store_true', default=False)
     parser.add_argument('--epochs_per_output', type=int, default=30,

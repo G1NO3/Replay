@@ -47,8 +47,10 @@ class Metrics(metrics.Collection):
     # acc: metrics.Average.from_output('acc')
     loss_last: metrics.Average.from_output('loss_last')
     loss_pred: metrics.Average.from_output('loss_pred')
+    loss_dist: metrics.Average.from_output('loss_dist')
     acc_last: metrics.Average.from_output('acc_last')
     acc_pred: metrics.Average.from_output('acc_pred')
+    acc_dist: metrics.Average.from_output('acc_dist')
 
 
 class TrainState(train_state.TrainState):
@@ -78,14 +80,14 @@ def create_train_state(encoder, hippo, rng, init_sample, config):
 
 
 @partial(jax.jit, static_argnums=(3, 4, 5, 6))
-def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_agent, hidden_size, bottleneck_size):
+def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_agent, hidden_size, bottleneck_size, key):
     """Train for a single step with rollouts from the buffer"""
     # state, obs(o_t)[t, n, h, w], actions(action_t-1)[t, n, 1], rewards(r_t-1)[t, n, 1], real_pos(s_t)[t, n, 2]
     # o_t, r_t-1, action_t-1 => s_t, r_t
 
     #  Initialize hidden
     hiddens = jnp.zeros((n_agent, hidden_size))
-
+    @partial(jax.jit, static_argnums=(2,3))
     def forward_fn(params_encoder, params_hippo, n_agent, bottleneck_size, hiddens, inputs):
         obs, action, rewards_prev = inputs
         obs_embed, action_embed = running_encoder_state.apply_fn({'params': params_encoder}, obs, action)
@@ -93,28 +95,38 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
         new_hidden, outputs = running_hippo_state.apply_fn({'params': params_hippo},
                                                            hiddens, pfc_input, (obs_embed, action_embed), rewards_prev)
         return new_hidden, outputs
-
-    def loss_fn(params_encoder, params_hippo, hiddens, batch):
+    @partial(jax.jit)
+    def loss_fn(params_encoder, params_hippo, hiddens, batch, key):
         len_t, n_agent, num_cells = batch['place_cells'].shape
         num_rewards = batch['rewards'].shape[-1]
         apply_fn = partial(forward_fn, params_encoder, params_hippo, n_agent, bottleneck_size)
-        _, all_preds = jax.lax.scan(apply_fn, hiddens, [batch['obs'], batch['action'], batch['rewards']])
-        preds_place = all_preds[:, :, :num_cells]
-        preds_rewards = all_preds[:, :, num_cells:num_cells+num_rewards]  # [t, n, 1]
-        preds_reward_distance = all_preds[:, :, num_cells+num_rewards:] # [t, n, 1]
-        loss_pred = optax.softmax_cross_entropy(preds_place, batch['place_cells']).mean()
-        acc_pred = (jnp.argmax(all_preds, axis=-1)
-                    == jnp.argmax(batch['place_cells'], axis=-1)).astype(jnp.float32).mean()
+        key, subkey = jax.random.split(key)
+        masked_rewards = mask_rewards(batch['rewards'], subkey, sample_len, n_agent, config.visual_reward_prob)
+        final_preds, all_preds = jax.lax.scan(apply_fn, hiddens, [batch['obs'], batch['action'], masked_rewards])
+        # final_preds n * 100+2
+        # preds_place = all_preds[:, :, :num_cells]
+        # preds_rewards = all_preds[:, :, num_cells:num_cells+num_rewards]  # [t, n, 1]
+        # preds_reward_distance = all_preds[:, :, num_cells+num_rewards:] # [t, n, 1]
+        preds_place = final_preds[:, :num_cells]
+        preds_rewards = final_preds[:, num_cells:num_cells+num_rewards]  # [n, 1]
+        preds_reward_distance = final_preds[:, num_cells+num_rewards:] # [n, 1]
+        loss_pred = optax.softmax_cross_entropy(preds_place, batch['place_cells'][-1]).mean()
+        acc_pred = (jnp.argmax(final_preds[:,:num_cells], axis=-1)
+                    == jnp.argmax(batch['place_cells'][-1], axis=-1)).astype(jnp.float32).mean()
 
         # pred last
-        rewards_label = batch['rewards'][1:]
-        loss_last = jnp.abs(preds_rewards[:-1] - rewards_label)  # [t-1, n, 1]
+        rewards_label = batch['rewards'][-1]
+        loss_last = jnp.abs(preds_rewards - rewards_label)  # [n, 1]
         loss_last = jnp.where(rewards_label > 0.4, loss_last * 20, loss_last)  # fixme: weighted loss
         acc_last = jnp.where((loss_last < 0.1) & jnp.isclose(rewards_label, config.mid_reward), 1, 0)
-        consider_last_flag = jnp.cumsum(rewards_label, axis=0) > 0.6
+        ### fix: only consider the accumulated reward
+        rewards_label = jnp.where(rewards_label!=config.mid_reward, 0, rewards_label)
+        consider_last_flag = jnp.cumsum(rewards_label, axis=0) > config.mid_reward
         loss_last = jnp.where(consider_last_flag, loss_last, 0).mean()
+        # boolvalue = jnp.where(consider_last_flag, 1, 0).sum()==0
+        # jax.debug.breakpoint()
         acc_last = jnp.where(consider_last_flag, acc_last, 0).sum() \
-                   / jnp.where(jnp.isclose(rewards_label, config.mid_reward) & consider_last_flag, 1, 0).sum()
+                   / jnp.where(consider_last_flag, 1, 0).sum()
         # fixme: cumsum_rewards > 0.6, considering random reward value is 0.5, > 0.6 means the second time met a reward
 
         loss_dist = jnp.abs(preds_reward_distance - batch['reward_distance_coding']).mean()
@@ -122,7 +134,7 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
         loss = loss_pred + loss_last + loss_dist
         return loss, (loss_last, loss_pred, loss_dist, acc_last, acc_pred, acc_dist)
 
-    grad_fn = jax.value_and_grad(partial(loss_fn, hiddens=hiddens, batch=batch), has_aux=True, argnums=(0, 1))
+    grad_fn = jax.value_and_grad(partial(loss_fn, hiddens=hiddens, batch=batch, key=key), has_aux=True, argnums=(0, 1))
     (loss, (loss_last, loss_pred, loss_dist, acc_last, acc_pred, acc_dist)), (grads_encoder, grads_hippo) = grad_fn(
         running_encoder_state.params,
         running_hippo_state.params)
@@ -159,15 +171,23 @@ def put_to_buffer(buffer_state, x):
     return dict(buffer_state, buffer=buffer, insert_pos=insert_pos)
 
 
-@partial(jax.jit, static_argnums=(1,))
-def sample_from_buffer(buffer_state, sample_len, key):
+# @partial(jax.jit, static_argnums=(1,2))
+def sample_from_buffer(buffer_state, sample_len, n_agents, key):
     # Not consider done
     max_val = buffer_state['insert_pos'] - sample_len + buffer_state['max_size']
     min_val = buffer_state['insert_pos']
-    begin_index = jax.random.randint(key, (1,), minval=min_val, maxval=max_val) % buffer_state['max_size']
+    ### 改成agent数目
+    begin_index = jax.random.randint(key, (n_agents,1), minval=min_val, maxval=max_val) % buffer_state['max_size']
+    # n_agent * sample_len
+    indices = (jnp.arange(sample_len).reshape(1,-1).repeat(n_agents,0) + begin_index.repeat(sample_len,axis=1)) % buffer_state['max_size']
+    # buffer: xi * buffer_size * n_agents
+    samples = [[] for _ in range(len(buffer_state['buffer']))]
+    for xi in range(len(buffer_state['buffer'])):
+        for agent_th in range(n_agents):
+            samples[xi].append(buffer_state['buffer'][xi][indices[agent_th], agent_th])
+        samples[xi] = jnp.stack(samples[xi], axis=1)
+    return samples
 
-    indices = (jnp.arange(sample_len) + begin_index) % buffer_state['max_size']
-    return [jnp.take(buffer_state['buffer'][xi], indices, axis=0) for xi in range(len(buffer_state['buffer']))]
 
     # return rollout
 
@@ -208,13 +228,19 @@ def mask_obs(obs, key, sample_len, n_agent, visual_prob):
     obs = jnp.where(mask < visual_prob, obs, 0)
     return obs
 
+@partial(jax.jit, static_argnums=(2, 3, 4))
+def mask_rewards(rewards, key, sample_len, n_agent, visual_reward_prob):
+    mask = jax.random.uniform(key, (sample_len, n_agent, 1))
+    rewards = jnp.where(mask < visual_reward_prob, rewards, 0)
+    return rewards
+
 
 @partial(jax.jit, static_argnums=(5, 6, 7, 8, 9))
 def a_loop(key, buffer_states, place_cell_state, running_encoder_state, running_hippo_state,
            sample_len, n_agents, visual_prob, hidden_size, bottleneck_size, mid_reward, reward_distance_ratio):
     # get from buffer, train_step()
     key, subkey = jax.random.split(key)
-    rollouts = sample_from_buffer(buffer_states, sample_len, subkey)
+    rollouts = sample_from_buffer(buffer_states, sample_len, n_agents, subkey)
     # print(ei, len(rollouts))
     batch = prepare_batch(rollouts, place_cell_state, mid_reward, reward_distance_ratio)
     batch['obs'] = mask_obs(batch['obs'], key,
@@ -222,7 +248,8 @@ def a_loop(key, buffer_states, place_cell_state, running_encoder_state, running_
     # print(batch['place_cells'].reshape((-1, 100)).std(axis=0).mean(), 'place cell std')
 
     running_encoder_state, running_hippo_state = train_step(running_encoder_state, running_hippo_state, batch,
-                                                            sample_len, n_agents, hidden_size, bottleneck_size)
+                                                            sample_len, n_agents, hidden_size, bottleneck_size,
+                                                            subkey)
     return key, buffer_states, place_cell_state, running_encoder_state, running_hippo_state
 
 
@@ -286,3 +313,9 @@ def main(config):
 
 if __name__ == '__main__':
     main(config)
+
+
+### mask Reward 预测最后一个
+### flag 只考虑同时有两个reward的情况
+##### 交替训练？### Fine-tune? 后边再试 现在不太行
+### VAE : 先试试能不能过拟合，以及滤波之后的低维

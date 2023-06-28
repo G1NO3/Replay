@@ -202,7 +202,7 @@ def init_states(args, key, random_reset=False):
     # Load Hippo ===========================================================================
     obs_embed, action_embed = running_encoder_state.apply_fn({'params': params}, *init_samples)
     key, subkey = jax.random.split(key)
-    hippo = Hippo(output_size=args.height * args.width + 1,
+    hippo = Hippo(output_size=args.height * args.width + 2,
                   hidden_size=args.hidden_size)
     hidden = jnp.zeros((args.n_agents, args.hidden_size))
     pfc_input = jnp.zeros((args.n_agents, args.bottleneck_size))
