@@ -7,8 +7,10 @@ import jax.numpy as jnp
 from flax import linen as nn  # Linen API
 from functools import partial
 from clu import metrics
+import flax.core
 from flax.training import train_state, checkpoints  # Useful dataclass to keep train state
 from flax import struct  # Flax dataclasses
+from flax.traverse_util import flatten_dict, unflatten_dict
 import optax  # Common loss functions and optimizers
 from jax import xla_computation
 from tensorboardX import SummaryWriter
@@ -47,10 +49,24 @@ class Metrics(metrics.Collection):
     # acc: metrics.Average.from_output('acc')
     loss_last: metrics.Average.from_output('loss_last')
     loss_pred: metrics.Average.from_output('loss_pred')
-    loss_dist: metrics.Average.from_output('loss_dist')
+    # acc_0: metrics.Average.from_output('acc_0')
+    # acc_r: metrics.Average.from_output('acc_r')
+    # acc_g: metrics.Average.from_output('acc_g')
     acc_last: metrics.Average.from_output('acc_last')
     acc_pred: metrics.Average.from_output('acc_pred')
-    acc_dist: metrics.Average.from_output('acc_dist')
+
+
+@struct.dataclass
+class Metrics2(metrics.Collection):
+    loss: metrics.Average.from_output('loss')
+    # acc: metrics.Average.from_output('acc')
+    loss_last: metrics.Average.from_output('loss_last')
+    loss_pred: metrics.Average.from_output('loss_pred')
+    acc_0: metrics.Average.from_output('acc_0')
+    acc_r: metrics.Average.from_output('acc_r')
+    acc_g: metrics.Average.from_output('acc_g')
+    # acc_last: metrics.Average.from_output('acc_last')
+    acc_pred: metrics.Average.from_output('acc_pred')
 
 
 class TrainState(train_state.TrainState):
@@ -65,13 +81,14 @@ def create_train_state(encoder, hippo, rng, init_sample, config):
     tx = optax.adamw(config.lr, weight_decay=config.wd)
     encoder_state = TrainState.create(
         apply_fn=encoder.apply, params=params, tx=tx,
-        metrics=Metrics.empty())
+        metrics=Metrics2.empty())  # todo: metrics2
     # Initialize hippo ====================================================================
     obs_embed, action_embed = encoder_state.apply_fn({'params': params}, *init_sample)
     hidden = jnp.zeros((config.n_agents, config.hidden_size))
     pfc_input = jnp.zeros((config.n_agents, config.bottleneck_size))
     rng, sub_rng = jax.random.split(rng)
-    params = hippo.init(sub_rng, hidden, pfc_input, (obs_embed, action_embed), jnp.zeros((config.n_agents, 1)))['params']
+    params = hippo.init(sub_rng, hidden, pfc_input, (obs_embed, action_embed), jnp.zeros((config.n_agents, 1)))[
+        'params']
     tx = optax.adamw(config.lr, weight_decay=config.wd)
     hippo_state = TrainState.create(
         apply_fn=hippo.apply, params=params, tx=tx,
@@ -80,14 +97,14 @@ def create_train_state(encoder, hippo, rng, init_sample, config):
 
 
 @partial(jax.jit, static_argnums=(3, 4, 5, 6))
-def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_agent, hidden_size, bottleneck_size, key):
+def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_agent, hidden_size, bottleneck_size):
     """Train for a single step with rollouts from the buffer"""
     # state, obs(o_t)[t, n, h, w], actions(action_t-1)[t, n, 1], rewards(r_t-1)[t, n, 1], real_pos(s_t)[t, n, 2]
     # o_t, r_t-1, action_t-1 => s_t, r_t
 
     #  Initialize hidden
     hiddens = jnp.zeros((n_agent, hidden_size))
-    @partial(jax.jit, static_argnums=(2,3))
+
     def forward_fn(params_encoder, params_hippo, n_agent, bottleneck_size, hiddens, inputs):
         obs, action, rewards_prev = inputs
         obs_embed, action_embed = running_encoder_state.apply_fn({'params': params_encoder}, obs, action)
@@ -95,57 +112,65 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
         new_hidden, outputs = running_hippo_state.apply_fn({'params': params_hippo},
                                                            hiddens, pfc_input, (obs_embed, action_embed), rewards_prev)
         return new_hidden, outputs
-    @partial(jax.jit)
-    def loss_fn(params_encoder, params_hippo, hiddens, batch, key):
+
+    def loss_fn(params_encoder, params_hippo, hiddens, batch):
         len_t, n_agent, num_cells = batch['place_cells'].shape
-        num_rewards = batch['rewards'].shape[-1]
         apply_fn = partial(forward_fn, params_encoder, params_hippo, n_agent, bottleneck_size)
-        key, subkey = jax.random.split(key)
-        masked_rewards = mask_rewards(batch['rewards'], subkey, sample_len, n_agent, config.visual_reward_prob)
-        final_preds, all_preds = jax.lax.scan(apply_fn, hiddens, [batch['obs'], batch['action'], masked_rewards])
-        # final_preds n * 100+2
-        # preds_place = all_preds[:, :, :num_cells]
-        # preds_rewards = all_preds[:, :, num_cells:num_cells+num_rewards]  # [t, n, 1]
-        # preds_reward_distance = all_preds[:, :, num_cells+num_rewards:] # [t, n, 1]
-        preds_place = final_preds[:, :num_cells]
-        preds_rewards = final_preds[:, num_cells:num_cells+num_rewards]  # [n, 1]
-        preds_reward_distance = final_preds[:, num_cells+num_rewards:] # [n, 1]
-        loss_pred = optax.softmax_cross_entropy(preds_place, batch['place_cells'][-1]).mean()
-        acc_pred = (jnp.argmax(final_preds[:,:num_cells], axis=-1)
-                    == jnp.argmax(batch['place_cells'][-1], axis=-1)).astype(jnp.float32).mean()
+        masked_rewards = batch['rewards'].at[-1, :, :].set(0)  # todo: mask and predict the last reward
+        _, all_preds = jax.lax.scan(apply_fn, hiddens, [batch['obs'], batch['action'], masked_rewards])
+        preds_place = all_preds[:, :, :num_cells]
+        preds_rewards = all_preds[:, :, num_cells:]  # [t, n, 1]
+        loss_pred = optax.softmax_cross_entropy(preds_place, batch['place_cells'])[:-1].mean()
+        # todo: [:-1]: not to pred the last place cell because of the masked rewards
+        acc_pred = (jnp.argmax(preds_place, axis=-1)  # todo: fix a bug: all_preds -> preds_place
+                    == jnp.argmax(batch['place_cells'], axis=-1)).astype(jnp.float32)[:-1].mean()
 
         # pred last
-        rewards_label = batch['rewards'][-1]
-        loss_last = jnp.abs(preds_rewards - rewards_label)  # [n, 1]
-        loss_last = jnp.where(rewards_label > 0.4, loss_last * 20, loss_last)  # fixme: weighted loss
-        acc_last = jnp.where((loss_last < 0.1) & jnp.isclose(rewards_label, config.mid_reward), 1, 0)
-        ### fix: only consider the accumulated reward
-        rewards_label = jnp.where(rewards_label!=config.mid_reward, 0, rewards_label)
-        consider_last_flag = jnp.cumsum(rewards_label, axis=0) > config.mid_reward
+        rewards_label = batch['rewards'][-1]  # [n, 1]  # todo: 1: :-1; only predict the last one
+        loss_last = jnp.abs(preds_rewards[-1] - rewards_label)  # [n, 1]  # only consider the last step
+        loss_last = jnp.where(rewards_label > 0.4, loss_last * 10, loss_last)  # todo: weighted loss, times by 20
+        acc_0 = jnp.where((loss_last < 0.2) & (jnp.abs(rewards_label - 0.) < 1e-3), 1, 0)  # todo: acc criterion: < 0.2
+        acc_r = jnp.where((loss_last < 0.2) & (jnp.abs(rewards_label - 0.5) < 1e-3), 1, 0)
+        acc_g = jnp.where((loss_last < 0.2) & (jnp.abs(rewards_label - 1.) < 1e-3), 1, 0)
+        consider_last_flag = (jnp.sum(
+            jnp.where(jnp.abs(batch['rewards'] - 1) < 1e-3, 0, batch['rewards']), axis=0) > 0.6
+                              ) | (rewards_label > 0.9)  # [n, 1], todo: consider: 1. gets reward twice; or 2. get goal
+        jax.debug.print('{a}_{b}', a=(jnp.sum(
+            jnp.where(jnp.abs(batch['rewards'] - 1) < 1e-3, 0, batch['rewards']), axis=0) > 0.6
+                                      ).mean(), b=(rewards_label > 0.9).mean())
         loss_last = jnp.where(consider_last_flag, loss_last, 0).mean()
-        # boolvalue = jnp.where(consider_last_flag, 1, 0).sum()==0
-        # jax.debug.breakpoint()
-        acc_last = jnp.where(consider_last_flag, acc_last, 0).sum() \
-                   / jnp.where(consider_last_flag, 1, 0).sum()
+        acc_0 = jnp.where(consider_last_flag, acc_0, 0).sum() \
+                / jnp.where((jnp.abs(rewards_label - 0.) < 1e-3) & consider_last_flag, 1, 0).sum()
+        acc_r = jnp.where(consider_last_flag, acc_r, 0).sum() \
+                / jnp.where((jnp.abs(rewards_label - 0.5) < 1e-3) & consider_last_flag, 1, 0).sum()
+        acc_g = jnp.where(consider_last_flag, acc_g, 0).sum() \
+                / jnp.where((jnp.abs(rewards_label - 1.) < 1e-3) & consider_last_flag, 1, 0).sum()
         # fixme: cumsum_rewards > 0.6, considering random reward value is 0.5, > 0.6 means the second time met a reward
 
-        loss_dist = jnp.abs(preds_reward_distance - batch['reward_distance_coding']).mean()
-        acc_dist = jnp.where((jnp.abs(preds_reward_distance - batch['reward_distance_coding']) < 0.05), 1, 0).astype(jnp.float32).mean()
-        loss = loss_pred + loss_last + loss_dist
-        return loss, (loss_last, loss_pred, loss_dist, acc_last, acc_pred, acc_dist)
+        loss = loss_pred + loss_last * 0.5  # todo: *0.1
+        return loss, (loss_last, loss_pred, acc_0, acc_r, acc_g, acc_pred)
 
-    grad_fn = jax.value_and_grad(partial(loss_fn, hiddens=hiddens, batch=batch, key=key), has_aux=True, argnums=(0, 1))
-    (loss, (loss_last, loss_pred, loss_dist, acc_last, acc_pred, acc_dist)), (grads_encoder, grads_hippo) = grad_fn(
+    grad_fn = jax.value_and_grad(partial(loss_fn, hiddens=hiddens, batch=batch), has_aux=True, argnums=(0, 1))
+    (loss, (loss_last, loss_pred, acc_0, acc_r, acc_g, acc_pred)), (grads_encoder, grads_hippo) = grad_fn(
         running_encoder_state.params,
         running_hippo_state.params)
     running_encoder_state = running_encoder_state.apply_gradients(grads=grads_encoder)
-    clip_fn = lambda z: jnp.clip(z, -1.0, 1.0)  # fixme: clip by value / by grad
-    grads_hippo = jax.tree_util.tree_map(clip_fn, grads_hippo)
+    # todo: clip by value / by grad ============================
+    # clip_fn = lambda z: jnp.clip(z, -1.0, 1.0)
+    # grads_hippo = jax.tree_util.tree_map(clip_fn, grads_hippo)
+    # ----------------------------------------------------------
+    grads_hippo = flatten_dict(grads_hippo).copy()
+    jax.debug.print('grad_{a}', a=jnp.linalg.norm(grads_hippo[('Dense_0', 'kernel')], ord=2))
+    grads_hippo[('Dense_0', 'kernel')] \
+        = grads_hippo[('Dense_0', 'kernel')] / jnp.maximum(jnp.linalg.norm(grads_hippo[('Dense_0', 'kernel')], ord=2), 5.0) * 5
+    grads_hippo = unflatten_dict(grads_hippo)
+    grads_hippo = flax.core.freeze(grads_hippo)
+    # ==========================================================
     running_hippo_state = running_hippo_state.apply_gradients(grads=grads_hippo)
 
     # compute metrics
     metric_updates = running_encoder_state.metrics.single_from_model_output(
-        loss=loss, loss_last=loss_last, loss_pred=loss_pred, loss_dist=loss_dist, acc_last=acc_last, acc_pred=acc_pred, acc_dist=acc_dist)
+        loss=loss, loss_last=loss_last, loss_pred=loss_pred, acc_0=acc_0, acc_r=acc_r, acc_g=acc_g, acc_pred=acc_pred)
     running_encoder_state = running_encoder_state.replace(metrics=metric_updates)
     return running_encoder_state, running_hippo_state
 
@@ -189,32 +214,16 @@ def sample_from_buffer(buffer_state, sample_len, n_agents, key):
     return samples
 
 
-    # return rollout
 
-# @jax.jit
-def calculate_distance_coding(current_pos, reward_pos, goal_pos, mid_reward, reward_distance_ratio):
-    # [t, n, 2], [t, n, 2], [t, n, 2]
-    mid_distance = ((current_pos - reward_pos)**2).sum(axis=-1,keepdims=True)**0.5
-    goal_distance = ((current_pos - goal_pos)**2).sum(axis=-1,keepdims=True)**0.5
-    distance_coding = jnp.exp(-mid_distance/reward_distance_ratio)*mid_reward + \
-                        jnp.exp(-goal_distance/reward_distance_ratio)*1.
-    return distance_coding #[n, 1]
 
-### to be finished
-def prepare_batch(rollouts, place_cell_state, mid_reward, reward_distance_ratio):
-    # obs [t, n, h, w], actions[t, n, 1], pos[t, n, 2], rewards[t, n, 1], reward_pos[t, n, 2]
+def prepare_batch(rollouts, place_cell_state):
+    # obs [t, n, h, w], actions[t, n, 1], pos[t, n, 2], rewards[t, n, 1]
     batch = dict()
     batch['obs'] = rollouts[0]
     batch['action'] = rollouts[1]
     batch['place_cells'] = jax.vmap(generate_place_cell, (None, None, 0), 0)(place_cell_state['centers'],
                                                                              place_cell_state['sigma'],
                                                                              rollouts[2])
-    cal_dist_coding = partial(calculate_distance_coding, mid_reward=mid_reward,
-                                reward_distance_ratio=reward_distance_ratio)
-    batch['reward_distance_coding'] = jax.vmap(cal_dist_coding, (0, 0, 0), 0)(rollouts[2],
-                                                                            rollouts[4],
-                                                                            rollouts[5])
-    # t * n * m
     batch['rewards'] = rollouts[3]
     return batch
 
@@ -228,28 +237,21 @@ def mask_obs(obs, key, sample_len, n_agent, visual_prob):
     obs = jnp.where(mask < visual_prob, obs, 0)
     return obs
 
-@partial(jax.jit, static_argnums=(2, 3, 4))
-def mask_rewards(rewards, key, sample_len, n_agent, visual_reward_prob):
-    mask = jax.random.uniform(key, (sample_len, n_agent, 1))
-    rewards = jnp.where(mask < visual_reward_prob, rewards, 0)
-    return rewards
-
 
 @partial(jax.jit, static_argnums=(5, 6, 7, 8, 9))
 def a_loop(key, buffer_states, place_cell_state, running_encoder_state, running_hippo_state,
-           sample_len, n_agents, visual_prob, hidden_size, bottleneck_size, mid_reward, reward_distance_ratio):
+           sample_len, n_agents, visual_prob, hidden_size, bottleneck_size):
     # get from buffer, train_step()
     key, subkey = jax.random.split(key)
     rollouts = sample_from_buffer(buffer_states, sample_len, n_agents, subkey)
     # print(ei, len(rollouts))
-    batch = prepare_batch(rollouts, place_cell_state, mid_reward, reward_distance_ratio)
+    batch = prepare_batch(rollouts, place_cell_state)
     batch['obs'] = mask_obs(batch['obs'], key,
                             sample_len, n_agents, visual_prob)
     # print(batch['place_cells'].reshape((-1, 100)).std(axis=0).mean(), 'place cell std')
 
     running_encoder_state, running_hippo_state = train_step(running_encoder_state, running_hippo_state, batch,
-                                                            sample_len, n_agents, hidden_size, bottleneck_size,
-                                                            subkey)
+                                                            sample_len, n_agents, hidden_size, bottleneck_size)
     return key, buffer_states, place_cell_state, running_encoder_state, running_hippo_state
 
 
@@ -261,7 +263,7 @@ def main(config):
     key = jax.random.PRNGKey(0)
     # Initialize env and place_cell ================================================
     key, subkey = jax.random.split(key)
-    obs, env_state = env.reset(config.width, config.height, config.n_agents, config.mid_reward, subkey)
+    obs, env_state = env.reset(config.width, config.height, config.n_agents, subkey)
     key, subkey = jax.random.split(key)
     actions = jax.random.randint(subkey, (config.n_agents, 1), minval=0, maxval=4)  # [n, 1]
     obs, rewards, done, env_state = env.step(env_state, actions)
@@ -269,7 +271,7 @@ def main(config):
     place_cell_state = create_place_cell_state(config.sigma, config.width, config.height)
     # Initialize model and training_state ============================
     encoder = Encoder()
-    hippo = Hippo(output_size=place_cell_state['centers'].shape[0] + 2,
+    hippo = Hippo(output_size=place_cell_state['centers'].shape[0] + 1,
                   hidden_size=config.hidden_size)
     key, subkey = jax.random.split(key)
     running_encoder_state, running_hippo_state = create_train_state(encoder, hippo, subkey,
@@ -277,11 +279,13 @@ def main(config):
                                                                     config)
     if config.load != '':
         running_encoder_state = checkpoints.restore_checkpoint(ckpt_dir=config.load, target=running_encoder_state)
-        running_hippo_state = checkpoints.restore_checkpoint(ckpt_dir=config.load.replace('encoder', 'hippo'), target=running_hippo_state)
+        running_hippo_state = checkpoints.restore_checkpoint(ckpt_dir=config.load.replace('encoder', 'hippo'),
+                                                             target=running_hippo_state)
+        running_encoder_state = running_encoder_state.replace(metrics=Metrics2.empty())
         print('load from', config.load)
     # Initialize buffer================================================
     buffer_states = create_buffer_states(max_size=config.max_size, init_sample=[obs, actions, env_state['current_pos'],
-                                                                                rewards, env_state['reward_pos'], env_state['goal_pos']])
+                                                                                rewards])
 
     for ei in range(config.epoch):
         key, subkey = jax.random.split(key)
@@ -289,7 +293,7 @@ def main(config):
         obs, rewards, done, env_state = env.step(env_state, actions)
         # put_to_buffer: o_t, r_t-1, action_t-1, s_t
         buffer_states = put_to_buffer(buffer_states, [obs, actions, env_state['current_pos'],
-                                                      rewards, env_state['reward_pos'], env_state['goal_pos']])
+                                                      rewards])
         # put to buffer [obs_t, a_t-1, pos_t, reward_t]
         key, subkey = jax.random.split(key)
         env_state = env.reset_reward(env_state, rewards, subkey)  # fixme: reset reward
@@ -299,13 +303,15 @@ def main(config):
                 a_loop(key, buffer_states, place_cell_state, running_encoder_state, running_hippo_state,
                        sample_len=config.sample_len, n_agents=config.n_agents,
                        visual_prob=config.visual_prob, hidden_size=config.hidden_size,
-                       bottleneck_size=config.bottleneck_size, mid_reward=config.mid_reward, 
-                       reward_distance_ratio=config.reward_distance_ratio)
+                       bottleneck_size=config.bottleneck_size)
 
         if ei % 100 == 0 and ei > config.max_size:
             for k, v in running_encoder_state.metrics.compute().items():
                 print(ei, k, v.item())
-                writer.add_scalar(f'train_{k}', v.item(), ei + 1)
+                if jnp.isnan(v).item():
+                    print(k, v)  # fixme
+                else:
+                    writer.add_scalar(f'train_{k}', v.item(), ei + 1)
         if ei % 5000 == 0 and ei > config.max_size:
             checkpoints.save_checkpoint(f'./modelzoo/{config.save_name}_encoder', target=running_encoder_state, step=ei)
             checkpoints.save_checkpoint(f'./modelzoo/{config.save_name}_hippo', target=running_hippo_state, step=ei)
