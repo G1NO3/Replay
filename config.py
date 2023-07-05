@@ -16,7 +16,7 @@ bottleneck_size = 8  # the dim of pfc's input to hippo
 # optimizer
 lr = 5e-4
 wd = 1e-3
-epoch = int(1e7)
+epoch = int(3e6)
 train_every = 16
 sample_len = 256
 
@@ -25,4 +25,4 @@ max_size = 20000
 
 # other
 save_name = 'env8'
-load = 'modelzoo/env8_encoder/checkpoint_250000'
+load = 'modelzoo/env8_encoder/checkpoint_385000'

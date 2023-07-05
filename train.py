@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument('--save_name', type=str, default='train0')
     parser.add_argument('--model_path', type=str, default='./modelzoo')
 
-    parser.add_argument('--mid_reward', type=float, default=2)
+    parser.add_argument('--mid_reward', type=float, default=0.5)
     parser.add_argument('--replay_steps', type=int, default=8)  # todo: tune
 
     parser.add_argument('--gamma', type=float, default=0.95)
@@ -41,13 +41,13 @@ def parse_args():
 
     # params that should be the same with config.py
     parser.add_argument('--bottleneck_size', type=int, default=8)
-    parser.add_argument('--width', type=int, default=10)
-    parser.add_argument('--height', type=int, default=10)
+    parser.add_argument('--width', type=int, default=8)
+    parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
     parser.add_argument('--visual_prob', type=float, default=0.05)
-    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/checkpoint_995000')  # todo: checkpoint
-    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/checkpoint_995000')
-    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_huge_reward995001')
+    parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_5770000')  # todo: checkpoint
+    parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_5770000')
+    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_995001')
 
     parser.add_argument('--hidden_size', type=int, default=128)
     args = parser.parse_args()
@@ -184,7 +184,7 @@ class TrainState(train_state.TrainState):
 
 def init_states(args, key, random_reset=False):
     key, subkey = jax.random.split(key)
-    obs, env_state = env.reset(args.width, args.height, args.n_agents, args.mid_reward, subkey)
+    obs, env_state = env.reset(args.width, args.height, args.n_agents, subkey)
 
     # Load encoder =================================================================================
     key, subkey = jax.random.split(key)
@@ -195,14 +195,14 @@ def init_states(args, key, random_reset=False):
 
     running_encoder_state = path_int.TrainState.create(
         apply_fn=encoder.apply, params=params, tx=optax.adamw(0.0, weight_decay=0.0),
-        metrics=path_int.Metrics.empty())
+        metrics=path_int.Metrics2.empty())
     if not random_reset:
         running_encoder_state = checkpoints.restore_checkpoint(ckpt_dir=args.load_encoder,
                                                             target=running_encoder_state)
     # Load Hippo ===========================================================================
     obs_embed, action_embed = running_encoder_state.apply_fn({'params': params}, *init_samples)
     key, subkey = jax.random.split(key)
-    hippo = Hippo(output_size=args.height * args.width + 2,
+    hippo = Hippo(output_size=args.height * args.width + 1,
                   hidden_size=args.hidden_size)
     hidden = jnp.zeros((args.n_agents, args.hidden_size))
     pfc_input = jnp.zeros((args.n_agents, args.bottleneck_size))
@@ -237,7 +237,7 @@ def init_states(args, key, random_reset=False):
     return env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state
 
 
-@partial(jax.jit, static_argnums=(5, 6, 7))
+# @partial(jax.jit, static_argnums=(5, 6, 7))
 def replay_fn(hippo_and_theta, xs, policy_params, hippo_state, policy_state,
               n_agents, obs_embed_size, action_embed_size):
     # to match the input/output stream of jax.lax.scan
@@ -246,12 +246,12 @@ def replay_fn(hippo_and_theta, xs, policy_params, hippo_state, policy_state,
     new_theta, (policy, value, to_hipp) = policy_state.apply_fn({'params': policy_params},
                                                                 theta, jnp.zeros((n_agents, obs_embed_size)),
                                                                 hippo_hidden)
-    new_hippo_hidden, _ = hippo_state.apply_fn({'params': hippo_state.params},
+    new_hippo_hidden, output = hippo_state.apply_fn({'params': hippo_state.params},
                                                hippo_hidden, to_hipp,
                                                (jnp.zeros((n_agents, obs_embed_size)),
                                                 jnp.zeros((n_agents, action_embed_size))),
                                                jnp.zeros((n_agents, 1)))
-    return (new_hippo_hidden, new_theta), (new_hippo_hidden, new_theta)
+    return (new_hippo_hidden, new_theta), (new_hippo_hidden, new_theta, output)
 
 
 @partial(jax.jit, static_argnums=(5, 6, 7))
@@ -273,10 +273,11 @@ def replay_fn_for_seq(hippo_and_theta, xs, policy_params, hippo_state, policy_st
     return (new_hippo_hidden, new_theta), (new_hippo_hidden, new_theta)
 
 
-@partial(jax.jit, static_argnums=(9, 10, 11, 12, 13, 14, 15))
+# @partial(jax.jit, static_argnums=(9, 10, 11, 12, 13, 14, 15))
 def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state,
                key, actions, hippo_hidden, theta,
-               n_agents, bottleneck_size, replay_steps, height, width, visual_prob, temperature):
+               n_agents, bottleneck_size, replay_steps, height, width, visual_prob, temperature,
+               plot_args=None):
     # Input: actions_t-1, h_t-1, theta_t-1,
     obs, rewards, done, env_state = env.step(env_state, actions)  # todo: reset
     key, subkey = jax.random.split(key)
@@ -299,11 +300,16 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
                                 hippo_state=hippo_state, policy_state=policy_state,
                                 n_agents=n_agents,
                                 obs_embed_size=obs_embed.shape[-1], action_embed_size=action_embed.shape[-1])
-    (replayed_hippo_hidden, replayed_theta), _ = jax.lax.scan(replay_fn_to_scan, init=(new_hippo_hidden, theta),
+    (replayed_hippo_hidden, replayed_theta), replayed_history = jax.lax.scan(replay_fn_to_scan, init=(new_hippo_hidden, theta),
                                                               xs=None, length=replay_steps)
     # replayed_hippo_hidden = jnp.where(rewards > 0, replayed_hippo_hidden, new_hippo_hidden)
     # fixme: not save replayed_hippo_hidden
     replayed_theta = jnp.where(rewards > 0, replayed_theta, theta)
+    if plot_args is not None:
+        if plot_args.no_replay:
+            replayed_theta = theta
+        if plot_args.no_goal_replay:
+            replayed_theta = jnp.where(rewards == 1, theta, replayed_theta)
 
     # Take action ==================================================================================
     _, (policy, value, _) = policy_state.apply_fn({'params': policy_state.params},
@@ -321,7 +327,7 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
     # jax.debug.print('obs{a}_actions_{b}_theta_{c}_rewards_{d}_newa_{e}',
     #                 a=env_state['current_pos'][0], b=actions[0], c=theta.mean(), d=rewards[0],
     #                 e=new_actions[0])
-    return env_state, buffer_state, new_actions, new_hippo_hidden, replayed_theta, rewards
+    return env_state, buffer_state, new_actions, new_hippo_hidden, replayed_theta, rewards, done, replayed_history
     # return action_t, h_t, theta_t (after replay), rewards_t-1 (for logging)
 
 
@@ -332,7 +338,7 @@ def eval_steps(env_state, buffer_state, running_encoder_state, running_hippo_sta
     all_rewards = []
     for _ in range(n_eval_steps):
         key, subkey = jax.random.split(key)
-        env_state, buffer_state, actions, hippo_hidden, theta, rewards \
+        env_state, buffer_state, actions, hippo_hidden, theta, rewards, done, replayed_history \
             = model_step(env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state,
                          subkey, actions, hippo_hidden, theta,
                          n_agents, bottleneck_size, replay_steps, height, width,
@@ -378,7 +384,7 @@ def main(args):
     for ei in range(args.epochs):
         # walk in the env and update buffer (model_step)
         key, subkey = jax.random.split(key)
-        env_state, buffer_state, actions, hippo_hidden, theta, rewards \
+        env_state, buffer_state, actions, hippo_hidden, theta, rewards, done, replayed_history \
             = model_step(env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state,
                          subkey, actions, hippo_hidden, theta,
                          args.n_agents, args.bottleneck_size, args.replay_steps, args.height, args.width,

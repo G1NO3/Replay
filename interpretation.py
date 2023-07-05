@@ -20,76 +20,6 @@ from sklearn.decomposition import PCA
 import matplotlib as mpl
 
 np.set_printoptions(threshold=np.inf)
-def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state,
-               key, actions, hippo_hidden, theta,
-               n_agents, bottleneck_size, replay_steps, height, width, visual_prob, temperature,
-               args):
-    # Input: actions_t-1, h_t-1, theta_t-1,
-    obs, rewards, done, env_state = env.step(env_state, actions)  # todo: reset
-    key, subkey = jax.random.split(key)
-    env_state = env.reset_reward(env_state, rewards, subkey)  # fixme: reset reward with 0.9 prob
-    # Mask obs ==========================================================================================
-    key, subkey = jax.random.split(key)
-    mask = jax.random.uniform(subkey, (obs.shape[0], 1, 1))
-    obs = jnp.where(mask < visual_prob, obs, 0)
-    # obs[n, h, w], actions[n, 1], rewards[n, 1]
-    # Encode obs and a_t-1 ===============================================================================
-    obs_embed, action_embed = encoder_state.apply_fn({'params': encoder_state.params}, obs, actions)
-
-    # Update hippo_hidden ==================================================================================
-    new_hippo_hidden, _ = hippo_state.apply_fn({'params': hippo_state.params},
-                                               hippo_hidden, jnp.zeros((n_agents, bottleneck_size)),
-                                               (obs_embed, action_embed), rewards)
-
-    # Replay, only when rewards > 0 ===============================================================
-    replay_fn_to_scan = partial(replay_fn, policy_params=policy_state.params,
-                                hippo_state=hippo_state, policy_state=policy_state,
-                                n_agents=n_agents,
-                                obs_embed_size=obs_embed.shape[-1], action_embed_size=action_embed.shape[-1])
-    (replayed_hippo_hidden, replayed_theta), replayed_history = jax.lax.scan(replay_fn_to_scan, init=(new_hippo_hidden, theta),
-                                                              xs=None, length=replay_steps)
-    # replayed_hippo_hidden = jnp.where(rewards > 0, replayed_hippo_hidden, new_hippo_hidden)
-    # fixme: not save replayed_hippo_hidden
-    replayed_theta = jnp.where(rewards > 0, replayed_theta, theta)
-    if args.no_replay:
-        replayed_theta = theta
-    if args.no_goal_replay:
-        replayed_theta = jnp.where(rewards == 1, theta, replayed_theta)
-    
-    # Take action ==================================================================================
-    _, (policy, value, _) = policy_state.apply_fn({'params': policy_state.params},
-                                                  replayed_theta, obs_embed, jnp.zeros_like(hippo_hidden))
-###简单的假设 决策时不更新theta
-    key, subkey = jax.random.split(key)
-    # new_actions = jnp.argmax(policy, axis=-1, keepdims=True)
-    new_actions = train.sample_from_policy(policy, subkey, temperature)
-    # todo: reset reward; consider the checkpoint logic of env
-    buffer_state = buffer.put_to_buffer(buffer_state,
-                                        [obs_embed, action_embed, new_hippo_hidden, theta,
-                                         rewards, new_actions, policy, value])
-    # put to Buffer:
-    # obs_emb_t, action_emb_t-1, h_t (before replay), theta_t (before replay)，
-    # rewards_t-1, action_t, policy_t, value_t
-    # jax.debug.print('obs{a}_actions_{b}_theta_{c}_rewards_{d}_newa_{e}',
-    #                 a=env_state['current_pos'][0], b=actions[0], c=theta.mean(), d=rewards[0],
-    #                 e=new_actions[0])
-    return env_state, buffer_state, new_actions, new_hippo_hidden, replayed_theta, rewards, done, replayed_history
-    # return action_t, h_t, theta_t (after replay), rewards_t-1 (for logging)
-def replay_fn(hippo_and_theta, xs, policy_params, hippo_state, policy_state,
-              n_agents, obs_embed_size, action_embed_size):
-    # to match the input/output stream of jax.lax.scan
-    # and also need to calculate grad of policy_params
-    hippo_hidden, theta = hippo_and_theta
-    new_theta, (policy, value, to_hipp) = policy_state.apply_fn({'params': policy_params},
-                                                                theta, jnp.zeros((n_agents, obs_embed_size)),
-                                                                hippo_hidden)
-    new_hippo_hidden, output = hippo_state.apply_fn({'params': hippo_state.params},
-                                               hippo_hidden, to_hipp,
-                                               (jnp.zeros((n_agents, obs_embed_size)),
-                                                jnp.zeros((n_agents, action_embed_size))),
-                                               jnp.zeros((n_agents, 1)))
-    return (new_hippo_hidden, new_theta), (new_hippo_hidden, new_theta, output)
-
 # def set_pos(grid, pos, value):
 #     grid = grid.at[pos[0], pos[1]].set(value)
 #     return grid, grid
@@ -108,20 +38,20 @@ def replay_fn(hippo_and_theta, xs, policy_params, hippo_state, policy_state,
 #     print(trajectory)
 #     return trajectory
 
-def plot_replay(replay_traj, color):
+def plot_replay(replay_traj, color, args):
     for replay_output in replay_traj:
-        plt.plot(replay_output//10, replay_output%10, c=color, marker='o', markersize=6)
+        plt.plot(replay_output//args.width, replay_output%args.height, c=color, marker='o', markersize=6)
 
-def plot_trajectory(whole_traj:dict):
+def plot_trajectory(whole_traj:dict,args):
     agent_th, state_traj, replay_traj, reward_pos_traj = whole_traj.values()
     plt.title(f'{agent_th}th agent, total_steps:{state_traj.shape[0]-1}')
     plt.grid()
     plt.plot(state_traj[:,0],state_traj[:,1])
-    plot_replay(replay_traj[:-1], 'blue')
-    plot_replay(replay_traj[-1:], 'red')
+    plot_replay(replay_traj[:-1], 'blue', args)
+    plot_replay(replay_traj[-1:], 'red', args)
     plt.scatter(reward_pos_traj[:,0],reward_pos_traj[:,1], marker='*', s=100, c='r')
 
-def plot_heatmap(reward_pos_traj, heatmap):
+def plot_heatmap(reward_pos_traj, heatmap, args):
     # reward_th * replay_step * hw
     for reward_th in range(len(heatmap)):
         for i in range(args.replay_steps):
@@ -129,11 +59,11 @@ def plot_heatmap(reward_pos_traj, heatmap):
             plt.ylim(10,0)
             plt.imshow(heatmap[reward_th][i].reshape(args.width,args.height).permute(1,0)[:,::-1])
             place_idx = heatmap[reward_th][i].item()
-            plt.title(f'argmax:{place_idx//10, place_idx%10}')
+            plt.title(f'argmax:{place_idx//args.width, place_idx%args.height}')
         plt.suptitle(f'reward position {reward_pos_traj[reward_th]}')
 
 
-def display_trajectory(whole_traj:dict, no_goal_replay=False):
+def display_trajectory(whole_traj:dict, no_goal_replay=False, args=None):
     agent_th, state_traj, replay_traj, reward_pos_traj = whole_traj.values()
     print(f'agent {agent_th}')
     print(f'state and action traj, total_step={state_traj.shape[0]-1}')
@@ -142,11 +72,12 @@ def display_trajectory(whole_traj:dict, no_goal_replay=False):
         print('replay at reward position:'+str(reward_pos_traj[i]))
         if i==len(replay_traj)-1 and no_goal_replay:
             break
-        print(jnp.stack((replay_output//10, replay_output%10),axis=-1))
+        print(jnp.stack((replay_output//args.width, replay_output%args.height),axis=-1))
 
 
 def plot_dimension_reduction_and_replay(ei:int, dimred_replay:dict, args):
-    hist_hippo, reward_hippo, total_steps, total_reward, total_replay_distance_scope = dimred_replay.values()
+    hist_hippo, reward_hippo, total_steps, total_reward, total_replay_distance_scope, \
+        reward_theta = dimred_replay.values()
     fig,[[ax0,ax1,ax2],[ax3,ax4,ax5]] = plt.subplots(2,3)
     ax0.set_title('epoch '+str(ei)+' all hippo hidden')
     pca = PCA(n_components=2)
@@ -211,13 +142,27 @@ def plot_dimension_reduction_and_replay(ei:int, dimred_replay:dict, args):
     if total_steps:
         ax3.hist(total_steps)
 
-    ax4.set_title('histogram of total reward'+f'\n mean:{np.mean(np.array(total_reward))}')
-    if total_reward:
-        ax4.hist(total_reward)
+    # ax4.set_title('histogram of total reward'+f'\n mean:{np.mean(np.array(total_reward))}')
+    # if total_reward:
+    #     ax4.hist(total_reward)
+    ax4.set_title('epoch '+str(ei)+' mid reward theta')
+    if reward_theta[0]:
+        mid_reward_theta = np.concatenate(reward_theta[0],axis=0)
+        mid_reward_theta = pca.fit_transform(mid_reward_theta)
+        # (replay_steps*n_agent*n_sample) * hidden_size
+        c_idx = np.arange(args.replay_steps).reshape(1,-1).repeat(mid_reward_theta.shape[0]//args.replay_steps,0).reshape((-1,))
+        ax4.scatter(mid_reward_theta[:,0],mid_reward_theta[:,1],c=c_idx,cmap=args.colormap)
 
-    ax5.set_title('total replay distance and scope')
-    if total_replay_distance_scope[0] and total_replay_distance_scope[1]:
-        ax5.bar(['distance','scope'],[np.mean(np.array(total_replay_distance_scope[0])),np.mean(np.array(total_replay_distance_scope[1]))])
+    # ax5.set_title('total replay distance and scope')
+    # if total_replay_distance_scope[0] and total_replay_distance_scope[1]:
+    #     ax5.bar(['distance','scope'],[np.mean(np.array(total_replay_distance_scope[0])),np.mean(np.array(total_replay_distance_scope[1]))])
+    ax5.set_title('epoch '+str(ei)+' goal theta')
+    if reward_theta[1]:
+        goal_theta = np.concatenate(reward_theta[1],axis=0)
+        goal_theta = pca.fit_transform(goal_theta)
+        # (replay_steps*n_agent*n_sample) * hidden_size
+        c_idx = np.arange(args.replay_steps).reshape(1,-1).repeat(goal_theta.shape[0]//args.replay_steps,0).reshape((-1,))
+        ax5.scatter(goal_theta[:,0],goal_theta[:,1],c=c_idx,cmap=args.colormap)
 
     cmap = mpl.cm.get_cmap(args.colormap)
     new_cmap = mpl.colors.ListedColormap([cmap(i) for i in np.linspace(0, 1, args.replay_steps)])
@@ -225,6 +170,8 @@ def plot_dimension_reduction_and_replay(ei:int, dimred_replay:dict, args):
     norm = mpl.colors.Normalize(vmin=0, vmax=args.replay_steps)
     fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=new_cmap))
 
+def display_repeat_hit():
+    pass
 
 ### reward位置不变
 def main(args):
@@ -244,11 +191,14 @@ def main(args):
     hist_actions = [[] for _ in range(args.n_agents)]
     hist_hippo = []
     reward_hippo = [[],[]]
+    reward_theta = [[],[]]
     total_steps = []
     total_reward = []
     total_replay_distance_scope = [[],[]]
     reward_pos_traj = None
     comparison_pts = jnp.zeros(args.n_agents,dtype=jnp.int32)
+    hit_total_place_since_first_meet = jnp.zeros((args.n_agents, 4),dtype=jnp.int32)# hit times and total times and the reward site(2)
+    hit_info_since_first_meet = []
     # short_mid_reward_hippo = [[] for _ in range(args.n_agents)]
     ### 短路径的mid-reward-replay和所有的mid-reward-replay没有明显区别
     # 0 for mid-path reward replay and 1 for goal replay
@@ -258,14 +208,14 @@ def main(args):
         if ei%30==0:
             print('epoch', ei)
         key, subkey = jax.random.split(key)
-        reward_pos = jnp.stack(jnp.where(env_state['grid']==2)[1:],axis=1)
+        reward_pos = env_state['reward_center']
 
         env_state, buffer_state, actions, hippo_hidden, theta, rewards, done, replayed_hippo_theta_output \
-            = model_step(env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state,
+            = train.model_step(env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state,
                          subkey, actions, hippo_hidden, theta,
                          args.n_agents, args.bottleneck_size, args.replay_steps, args.height, args.width,
                          args.visual_prob, temperature=0.05,
-                         args=args)
+                         plot_args=args)
         
         replayed_hippo_history, replayed_theta_history, output_history = replayed_hippo_theta_output
         # replay_hippo_theta_output: (replay_steps, n_agents, hidden_size), (replay_steps, n_agents, hidden_size)
@@ -277,25 +227,51 @@ def main(args):
         # replay_step * n_agents
         
         for n in range(args.n_agents):
+            if args.only_agent_th!=-1 and n!=args.only_agent_th:
+                continue
             hist_actions[n].append(actions[n])
             hist_pos[n].append(env_state['current_pos'][n])
+            
             if rewards[n]:
                 # including mid_reward and goal
-                if rewards[n] != 1:
+                if not jnp.isclose(rewards[n],1):
                     hist_reward_pos[n].append(jnp.array((reward_pos[n][0],reward_pos[n][1])))
+                    
                     reward_hippo[0].append(replayed_hippo_history[:,n,:])
+                    reward_theta[0].append(replayed_theta_history[:,n,:])
                 else:
                     hist_reward_pos[n].append(jnp.array((env_state['goal_pos'][n])))
                     reward_hippo[1].append(replayed_hippo_history[:,n,:])
+                    reward_theta[1].append(replayed_theta_history[:,n,:])
+                    if not (reward_pos[n] == hit_total_place_since_first_meet[n][2:]).all():
+                        if hit_total_place_since_first_meet[n,1]!=0:
+                            print('hit_times',hit_total_place_since_first_meet[n,0])
+                            print('total_times',hit_total_place_since_first_meet[n,1])
+                            hit_info_since_first_meet.append((hit_total_place_since_first_meet[n,0],hit_total_place_since_first_meet[n,1]))
+                        hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,0].set(1)
+                        hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,2:].set(reward_pos[n])
+                    else:
+                        hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,0].add(1)
+                        # print('hit times:',hit_total_place_since_first_meet[n,0])
+                        # print('total times:',hit_total_place_since_first_meet[n,1])
                 hist_replay_place[n].append(max_decoding_place[:,n]) # replay_step * hw
                 hist_replay_place_map[n].append(place_map[:,n,:])
                 total_reward.append(rewards[n])
                 
-            if done[n]:
+            if done[n] and (args.only_agent_th==-1 or (args.only_agent_th!=-1 and n==args.only_agent_th)):
+                print('reward_pos',reward_pos[n])
                 start_p = hist_pos[n].pop()
                 start_a = hist_actions[n][-1]
                 hist_pos[n].append(env_state['goal_pos'][n])
                 total_steps.append(len(hist_pos[n])-1)
+                if hit_total_place_since_first_meet[n,0]!=0:
+                    hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,1].add(1)
+                    if not (reward_pos[n] == hit_total_place_since_first_meet[n,2:]).all():
+                        print('hit_times',hit_total_place_since_first_meet[n,0])
+                        print('total_times',hit_total_place_since_first_meet[n,1])
+                        hit_info_since_first_meet.append((hit_total_place_since_first_meet[n,0],hit_total_place_since_first_meet[n,1]))
+                        hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,0].set(0)
+                        hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,1].set(0)
 
                 interest_condition = (not args.only_reward_trajectory \
                     or (args.only_reward_trajectory and len(hist_reward_pos[n])>1))
@@ -306,20 +282,20 @@ def main(args):
                     whole_traj = {'agent_th':n, 'state_traj':state_traj, 'replay_traj':hist_replay_place[n], 'reward_pos_traj':reward_pos_traj}
                     hist_traj[n].append(whole_traj)
                     if args.output_traj:
-                        display_trajectory(whole_traj, args.no_goal_replay)
-                        plot_trajectory(whole_traj)
+                        display_trajectory(whole_traj, args.no_goal_replay, args)
+                        plot_trajectory(whole_traj, args)
                         plt.show()
                         plt.cla()
                         if args.output_heatmap:
-                            plot_heatmap(reward_pos_traj, hist_replay_place_map[n])
+                            plot_heatmap(reward_pos_traj, hist_replay_place_map[n], args)
                             plt.show()
                             plt.cla()
                     for i, replay_output in enumerate(hist_replay_place[n]):
                         if i==len(hist_replay_place[n])-1 and args.no_goal_replay:
                             break
-                        replay_distance = jnp.sqrt(jnp.square(jnp.diff(replay_output//10))+jnp.square(jnp.diff(replay_output%10))).sum()
-                        replay_scope = (jnp.max(replay_output//10)-jnp.min(replay_output//10)) \
-                                        + (jnp.max(replay_output%10)-jnp.min(replay_output%10))
+                        replay_distance = jnp.sqrt(jnp.square(jnp.diff(replay_output//args.width))+jnp.square(jnp.diff(replay_output%args.height))).sum()
+                        replay_scope = (jnp.max(replay_output//args.width)-jnp.min(replay_output//args.width)) \
+                                        + (jnp.max(replay_output%args.height)-jnp.min(replay_output%args.height))
                         total_replay_distance_scope[0].append(replay_distance)
                         total_replay_distance_scope[1].append(replay_scope)
                 hist_pos[n] = [start_p]
@@ -331,21 +307,24 @@ def main(args):
 
         if args.output_dimension_reduction and ei%args.epochs_per_output==args.epochs_per_output-1:
             dimred_replay = {'hist_hippo':hist_hippo, 'reward_hippo':reward_hippo, 'total_steps':total_steps,\
-                 'total_reward':total_reward, 'total_replay_distance_scope':total_replay_distance_scope}
+                 'total_reward':total_reward, 'total_replay_distance_scope':total_replay_distance_scope,\
+                      'reward_theta':reward_theta}
             plot_dimension_reduction_and_replay(ei, dimred_replay, args)
             plt.show()
-            plt.cla()
         
         if args.output_comparison:
             for n in range(args.n_agents):
                 if len(hist_traj[n])>=args.pics_per_output+comparison_pts[n]:
                     for i in range(args.pics_per_output):
                         plt.subplot(2,args.pics_per_output//2,i+1)
-                        print(len(hist_traj[n]))
-                        print(comparison_pts[n])
+                        # print(len(hist_traj[n]))
+                        # print(comparison_pts[n])
                         whole_traj = hist_traj[n][i+comparison_pts[n]]
-                        display_trajectory(whole_traj)
-                        plot_trajectory(whole_traj)
+                        # display_trajectory(whole_traj, args.no_goal_replay, args)
+                        plot_trajectory(whole_traj, args)
+                    hit_info = jnp.array(hit_info_since_first_meet)
+                    plt.suptitle('hit_percent_since_first_meet:'+str((hit_info[:,0]/hit_info[:,1]).mean()))
+                    print(hit_info)
                     plt.show()
                     plt.cla()
                     comparison_pts = comparison_pts.at[n].add(args.pics_per_output)
@@ -400,28 +379,29 @@ if __name__ == '__main__':
 
     # params that should be the same with config.py
     parser.add_argument('--bottleneck_size', type=int, default=8)
-    parser.add_argument('--width', type=int, default=10)
-    parser.add_argument('--height', type=int, default=10)
+    parser.add_argument('--width', type=int, default=8)
+    parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
     parser.add_argument('--visual_prob', type=float, default=0.05)
-    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/reward2_pos_cod_checkpoint_9995000')  # todo: checkpoint
-    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/reward2_pos_cod_checkpoint_9995000')
-    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_reward2_pos_cod_995001')
+    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/env8_5770000')  # todo: checkpoint
+    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/env8_5770000')
+    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_995001')
     parser.add_argument('--hidden_size', type=int, default=128)
 
     # visualization
     parser.add_argument('--colormap', type=str, default='Set1')
     parser.add_argument('--output_traj', '-t', action='store_true', default=False)
+    parser.add_argument('--only_agent_th','-ag', type=int, default=-1)
     parser.add_argument('--only_reward_trajectory', '-r', action='store_true' ,default=False)
     parser.add_argument('--output_dimension_reduction', '-d', action='store_true', default=False)
-    parser.add_argument('--epochs_per_output', type=int, default=30,
+    parser.add_argument('--epochs_per_output', '-ep', type=int, default=30,
                         help='how many epochs before output of dimension reduction')
     parser.add_argument('--no_replay', action='store_true', default=False)
     parser.add_argument('--no_goal_replay', action='store_true', default=False)
     parser.add_argument('--output_heatmap', action='store_true', default=False)
     parser.add_argument('--output_comparison', '-c', action='store_true', default=False,
                         help='whether to output continuous trajectories of one agent')
-    parser.add_argument('--pics_per_output',type=int, default=4,
+    parser.add_argument('--pics_per_output','-pp',type=int, default=4,
                         help='how many trajectories to be showed of one agent in output')
 
 

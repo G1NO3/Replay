@@ -27,8 +27,8 @@ def add_obstacle(grid, obstacles, n_agents):
 @partial(jax.jit, static_argnums=(2, 3, 4))
 def add_reward(grid, key, n_agents, height, width):
     key, *subkeys = jax.random.split(key, 3)
-    reward_x = jax.random.randint(subkeys[0], (n_agents,), minval=1, maxval=height - 1)  # fixme: h-1/h-2?
-    reward_y = jax.random.randint(subkeys[1], (n_agents,), minval=1, maxval=width - 1)
+    reward_x = jax.random.randint(subkeys[0], (n_agents,1), minval=1, maxval=height - 1)  # fixme: h-1/h-2?
+    reward_y = jax.random.randint(subkeys[1], (n_agents,1), minval=1, maxval=width - 1)
 
     # fixme: one reward for each env
     def set_r(gd, pos):
@@ -36,11 +36,12 @@ def add_reward(grid, key, n_agents, height, width):
         return gd.at[pos[0], pos[1]].set(2)
 
     grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x, reward_y), axis=1))  # todo
-    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x + 1, reward_y + 1), axis=1))
-    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x + 1, reward_y - 1), axis=1))
-    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x - 1, reward_y + 1), axis=1))
-    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x - 1, reward_y - 1), axis=1))
-    return grid
+    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x + 1, reward_y), axis=1))
+    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x - 1, reward_y), axis=1))
+    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x, reward_y + 1), axis=1))
+    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x, reward_y - 1), axis=1))
+    reward_center = jnp.concatenate((reward_x, reward_y),axis=1)
+    return grid, reward_center
 
 
 @jax.jit
@@ -88,13 +89,13 @@ def reset(width, height, n_agents, key):
     grid = add_obstacle(grid, [[] for _ in range(n_agents)], n_agents)
     # fixme: no obstacles now; so add_obstacle is not checked
     # fixme: magic number: 0 for pathway, 1 for obstacle, 2 for reward, 3 for self pos
-    grid = add_reward(grid, key, n_agents, height, width)
+    grid, reward_center = add_reward(grid, key, n_agents, height, width)
     start_pos = jnp.array([[0, 0]] * n_agents)
     goal_pos = jnp.array([[height - 1, width - 1]] * n_agents)
     current_pos = start_pos
 
     return prepare_obs(grid, current_pos), {'grid': grid, 'current_pos': current_pos,
-                                            'goal_pos': goal_pos}
+                                            'goal_pos': goal_pos, 'reward_center':reward_center}
 
 
 @jax.jit
@@ -118,9 +119,10 @@ def reset_reward(env_state, rewards, key):
     reset_flag = jax.random.uniform(subkey, (rewards.shape[0], 1, 1)) < 0.1
     new_grid = jnp.where((rewards.reshape((-1, 1, 1)) > 0) & reset_flag, 0, env_state['grid'])
     # fixme: if reward, set grid to 0 (no obstacles)
-    new_grid = add_reward(new_grid, key, *env_state['grid'].shape)
+    new_grid, new_center = add_reward(new_grid, key, *env_state['grid'].shape)
     new_grid = jnp.where((rewards.reshape((-1, 1, 1)) > 0) & reset_flag, new_grid, env_state['grid'])
-    env_state = dict(env_state, grid=new_grid)
+    new_center = jnp.where((rewards.reshape((-1, 1)) > 0) & reset_flag.reshape(-1,1), new_center, env_state['reward_center'])
+    env_state = dict(env_state, grid=new_grid, reward_center=new_center)
 
     return env_state
 

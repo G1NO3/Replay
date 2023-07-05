@@ -121,6 +121,7 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
         preds_place = all_preds[:, :, :num_cells]
         preds_rewards = all_preds[:, :, num_cells:]  # [t, n, 1]
         loss_pred = optax.softmax_cross_entropy(preds_place, batch['place_cells'])[:-1].mean()
+        # exclude the last step of place_cell prediction
         # todo: [:-1]: not to pred the last place cell because of the masked rewards
         acc_pred = (jnp.argmax(preds_place, axis=-1)  # todo: fix a bug: all_preds -> preds_place
                     == jnp.argmax(batch['place_cells'], axis=-1)).astype(jnp.float32)[:-1].mean()
@@ -128,7 +129,7 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
         # pred last
         rewards_label = batch['rewards'][-1]  # [n, 1]  # todo: 1: :-1; only predict the last one
         loss_last = jnp.abs(preds_rewards[-1] - rewards_label)  # [n, 1]  # only consider the last step
-        loss_last = jnp.where(rewards_label > 0.4, loss_last * 10, loss_last)  # todo: weighted loss, times by 20
+        loss_last = jnp.where(rewards_label > 0.4, loss_last * 10, loss_last)  # todo: weighted loss, times by 10
         acc_0 = jnp.where((loss_last < 0.2) & (jnp.abs(rewards_label - 0.) < 1e-3), 1, 0)  # todo: acc criterion: < 0.2
         acc_r = jnp.where((loss_last < 0.2) & (jnp.abs(rewards_label - 0.5) < 1e-3), 1, 0)
         acc_g = jnp.where((loss_last < 0.2) & (jnp.abs(rewards_label - 1.) < 1e-3), 1, 0)
@@ -205,7 +206,7 @@ def sample_from_buffer(buffer_state, sample_len, n_agents, key):
     begin_index = jax.random.randint(key, (n_agents,1), minval=min_val, maxval=max_val) % buffer_state['max_size']
     # n_agent * sample_len
     indices = (jnp.arange(sample_len).reshape(1,-1).repeat(n_agents,0) + begin_index.repeat(sample_len,axis=1)) % buffer_state['max_size']
-    # buffer: xi * buffer_size * n_agents
+    # buffer: xi * buffer_size * n_agents * xi_specific_dimension
     samples = [[] for _ in range(len(buffer_state['buffer']))]
     for xi in range(len(buffer_state['buffer'])):
         for agent_th in range(n_agents):
@@ -218,6 +219,7 @@ def sample_from_buffer(buffer_state, sample_len, n_agents, key):
 
 def prepare_batch(rollouts, place_cell_state):
     # obs [t, n, h, w], actions[t, n, 1], pos[t, n, 2], rewards[t, n, 1]
+    # t = sample_len
     batch = dict()
     batch['obs'] = rollouts[0]
     batch['action'] = rollouts[1]
@@ -311,10 +313,10 @@ def main(config):
                 if jnp.isnan(v).item():
                     print(k, v)  # fixme
                 else:
-                    writer.add_scalar(f'train_{k}', v.item(), ei + 1)
+                    writer.add_scalar(f'train_{k}', v.item(), ei + 1) 
         if ei % 5000 == 0 and ei > config.max_size:
-            checkpoints.save_checkpoint(f'./modelzoo/{config.save_name}_encoder', target=running_encoder_state, step=ei)
-            checkpoints.save_checkpoint(f'./modelzoo/{config.save_name}_hippo', target=running_hippo_state, step=ei)
+            checkpoints.save_checkpoint(f'./modelzoo/{config.save_name}_encoder', target=running_encoder_state, step=ei, overwrite=True)
+            checkpoints.save_checkpoint(f'./modelzoo/{config.save_name}_hippo', target=running_hippo_state, step=ei, overwrite=True)
 
 
 if __name__ == '__main__':
@@ -325,3 +327,6 @@ if __name__ == '__main__':
 ### flag 只考虑同时有两个reward的情况
 ##### 交替训练？### Fine-tune? 后边再试 现在不太行
 ### VAE : 先试试能不能过拟合，以及滤波之后的低维
+
+### 阻断replay后再进行学习
+### 学习一些生物故事
