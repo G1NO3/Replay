@@ -18,6 +18,10 @@ init_samples_for_buffer = [
     =   [obs_embed, action_embed, new_hippo_hidden, theta,
             rewards, new_actions, policy, value]
 
+t = sample_len
+batch = {'obs_embed': [t, n, 64], 'action_embed': [t, n, 4], 'his_hippo_hidden': [t, n, h], 'his_theta': [t, n, h],
+        'his_rewards': [t, n, 1], 'his_action': [t, n, 1], 'his_logits': [t, n, 4], 'his_values': [t, n, 1]
+        }
 当前环境没有障碍物,后边加一下
 
 dimensions = {'obs':144, 'theta':128, 'hippo_hidden':128, 'bottleneck_size':8, 'to_hippo':8, 'hippo_info':8}
