@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument('--visual_prob', type=float, default=0.05)
     parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_2995000')  # todo: checkpoint
     parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_2995000')
-    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_995001')
+    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_995001')
 
     parser.add_argument('--hidden_size', type=int, default=128)
     args = parser.parse_args()
@@ -289,7 +289,7 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
     # Mask obs ==========================================================================================
     key, subkey = jax.random.split(key)
     mask = jax.random.uniform(subkey, (obs.shape[0], 1, 1))
-    mask = mask.at[0,...].set(0)
+    # mask = mask.at[0,...].set(0)
     obs = jnp.where(mask < visual_prob, obs, 0)
     # obs[n, h, w], actions[n, 1], rewards[n, 1]
     # Encode obs and a_t-1 ===============================================================================
@@ -301,10 +301,15 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
                                                (obs_embed, action_embed), rewards)
 
     # Replay, only when rewards > 0 ===============================================================
-    replay_fn_to_scan = partial(replay_fn, policy_params=policy_state.params,
+    if plot_args is not None:
+        replay_fn_ = replay_fn.__wrapped__
+    else:
+        replay_fn_ = replay_fn
+    replay_fn_to_scan = partial(replay_fn_, policy_params=policy_state.params,
                                 hippo_state=hippo_state, policy_state=policy_state,
                                 n_agents=n_agents,
                                 obs_embed_size=obs_embed.shape[-1], action_embed_size=action_embed.shape[-1])
+
     (replayed_hippo_hidden, replayed_theta), replayed_history = jax.lax.scan(replay_fn_to_scan, init=(new_hippo_hidden, theta),
                                                               xs=None, length=replay_steps)
     # replayed_hippo_hidden = jnp.where(rewards > 0, replayed_hippo_hidden, new_hippo_hidden)

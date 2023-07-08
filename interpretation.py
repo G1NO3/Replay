@@ -43,7 +43,7 @@ def plot_replay(replay_traj, color, args):
         plt.plot(replay_output//args.width, replay_output%args.height, c=color, marker='o', markersize=6)
 
 def plot_trajectory(whole_traj:dict,args):
-    agent_th, state_traj, replay_traj, reward_pos_traj = whole_traj.values()
+    agent_th, state_traj, replay_traj, reward_pos_traj, get_reward_traj = whole_traj.values()
     plt.title(f'{agent_th}th agent, total_steps:{state_traj.shape[0]-1}')
     plt.grid()
     plt.plot(state_traj[:,0],state_traj[:,1])
@@ -64,12 +64,12 @@ def plot_heatmap(reward_pos_traj, heatmap, args):
 
 
 def display_trajectory(whole_traj:dict, no_goal_replay=False, args=None):
-    agent_th, state_traj, replay_traj, reward_pos_traj = whole_traj.values()
+    agent_th, state_traj, replay_traj, reward_pos_traj, get_reward_traj = whole_traj.values()
     print(f'agent {agent_th}')
     print(f'state and action traj, total_step={state_traj.shape[0]-1}')
     print(state_traj)
     for i, replay_output in enumerate(replay_traj):
-        print('replay at reward position:'+str(reward_pos_traj[i]))
+        print('replay at reward position:'+str(get_reward_traj[i]))
         if i==len(replay_traj)-1 and no_goal_replay:
             break
         print(jnp.stack((replay_output//args.width, replay_output%args.height),axis=-1))
@@ -182,6 +182,17 @@ def main(args):
     actions = jnp.zeros((args.n_agents, 1), dtype=jnp.int32)
     hippo_hidden = jnp.zeros((args.n_agents, args.hidden_size))
     theta = jnp.zeros((args.n_agents, args.hidden_size))
+    # for i in range(20):
+    #     key, key1, key2 = jax.random.split(key,num=3)
+    #     new_theta,(policy,value,to_hipp) = running_policy_state.apply_fn({'params':running_policy_state.params},
+    #                                     jax.random.normal(key1,(args.n_agents, args.hidden_size)),
+    #                                     jax.random.normal(key2,(args.n_agents, 64)),
+    #                                     jnp.zeros((args.n_agents, args.hidden_size)))
+    #     print('new_theta:',new_theta)
+        # print('policy:',policy)
+        # print('action:',jnp.argmax(policy,axis=-1))
+        # print('value:',value)
+        # print('to_hipp:',to_hipp)
 
     hist_pos = [[] for n in range(args.n_agents)]
     hist_reward_pos = [[] for n in range(args.n_agents)]
@@ -195,6 +206,7 @@ def main(args):
     total_steps = []
     total_reward = []
     total_replay_distance_scope = [[],[]]
+    get_reward_pos = [[] for _ in range(args.n_agents)]
     reward_pos_traj = None
     comparison_pts = jnp.zeros(args.n_agents,dtype=jnp.int32)
     hit_total_place_since_first_meet = jnp.zeros((args.n_agents, 4),dtype=jnp.int32)# hit times and total times and the reward site(2)
@@ -211,13 +223,14 @@ def main(args):
         reward_pos = env_state['reward_center']
 
         env_state, buffer_state, actions, hippo_hidden, theta, rewards, done, replayed_hippo_theta_output \
-            = train.model_step(env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state,
+            = train.model_step.__wrapped__(env_state, buffer_state, running_encoder_state, running_hippo_state, running_policy_state,
                          subkey, actions, hippo_hidden, theta,
                          args.n_agents, args.bottleneck_size, args.replay_steps, args.height, args.width,
                          args.visual_prob, temperature=0.05,
                          plot_args=args)
         
         replayed_hippo_history, replayed_theta_history, output_history = replayed_hippo_theta_output
+
         # replay_hippo_theta_output: (replay_steps, n_agents, hidden_size), (replay_steps, n_agents, hidden_size)
         hist_hippo.append(replayed_hippo_history.reshape(-1,args.hidden_size))
         # replay_step * n_agents * hidden_size
@@ -236,11 +249,12 @@ def main(args):
                 # including mid_reward and goal
                 if not jnp.isclose(rewards[n],1):
                     hist_reward_pos[n].append(jnp.array((reward_pos[n][0],reward_pos[n][1])))
-                    
+                    get_reward_pos[n].append(env_state['current_pos'][n])
                     reward_hippo[0].append(replayed_hippo_history[:,n,:])
                     reward_theta[0].append(replayed_theta_history[:,n,:])
                 else:
                     hist_reward_pos[n].append(jnp.array((env_state['goal_pos'][n])))
+                    get_reward_pos[n].append(env_state['current_pos'][n])
                     reward_hippo[1].append(replayed_hippo_history[:,n,:])
                     reward_theta[1].append(replayed_theta_history[:,n,:])
                     if not (reward_pos[n] == hit_total_place_since_first_meet[n][2:]).all():
@@ -279,7 +293,8 @@ def main(args):
                     state_traj = jnp.concatenate((jnp.stack(hist_pos[n],axis=0),jnp.stack(hist_actions[n],axis=0)),axis=1)
                     reward_pos_traj = jnp.stack(hist_reward_pos[n],axis=0)
 
-                    whole_traj = {'agent_th':n, 'state_traj':state_traj, 'replay_traj':hist_replay_place[n], 'reward_pos_traj':reward_pos_traj}
+                    whole_traj = {'agent_th':n, 'state_traj':state_traj, 'replay_traj':hist_replay_place[n], \
+                        'reward_pos_traj':reward_pos_traj, 'get_reward_pos_traj':get_reward_pos[n]}
                     hist_traj[n].append(whole_traj)
                     if args.output_traj:
                         display_trajectory(whole_traj, args.no_goal_replay, args)
@@ -304,6 +319,7 @@ def main(args):
                 hist_replay_place_map[n] = []
                 hist_actions[n] = [start_a]
                 reward_pos_traj = None
+                get_reward_pos[n] = []
 
         if args.output_dimension_reduction and ei%args.epochs_per_output==args.epochs_per_output-1:
             dimred_replay = {'hist_hippo':hist_hippo, 'reward_hippo':reward_hippo, 'total_steps':total_steps,\
@@ -383,8 +399,8 @@ if __name__ == '__main__':
     parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
     parser.add_argument('--visual_prob', type=float, default=0.05)
-    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/env8_5770000')  # todo: checkpoint
-    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/env8_5770000')
+    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/env8_2995000')  # todo: checkpoint
+    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/env8_2995000')
     parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_995001')
     parser.add_argument('--hidden_size', type=int, default=128)
 
