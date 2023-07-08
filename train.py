@@ -45,8 +45,8 @@ def parse_args():
     parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
     parser.add_argument('--visual_prob', type=float, default=0.05)
-    parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_5770000')  # todo: checkpoint
-    parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_5770000')
+    parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_2995000')  # todo: checkpoint
+    parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_2995000')
     parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_995001')
 
     parser.add_argument('--hidden_size', type=int, default=128)
@@ -422,7 +422,7 @@ def main(args):
                 print(k, v.item())
                 writer.add_scalar(f'train_{k}', v.item(), ei + 1)
             # save model
-            checkpoints.save_checkpoint(args.model_path, running_policy_state, ei + 1, prefix='r_policy', overwrite=True)
+            checkpoints.save_checkpoint(args.model_path, running_policy_state, ei + 1, prefix='r_policy_env8_', overwrite=True)
 
 
 if __name__ == '__main__':
