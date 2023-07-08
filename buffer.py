@@ -41,7 +41,7 @@ def sample_from_buffer(buffer_state, sample_len, key):
              'his_rewards': batch[4], 'his_action': batch[5], 'his_logits': batch[6], 'his_values': batch[7]
              }
     for k in batch:
-        if k == 'his_rewards':  # fixme: his_rewards is of t-1, align it with other
+        if batch[k] == 'his_rewards':  # fixme: his_rewards is of t-1, align it with other
             batch[k] = batch[k][1:]
         else:
             batch[k] = batch[k][:-1]

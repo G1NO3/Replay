@@ -56,11 +56,10 @@ def plot_heatmap(reward_pos_traj, heatmap, args):
     for reward_th in range(len(heatmap)):
         for i in range(args.replay_steps):
             plt.subplot(2,4,i+1)
-            plt.ylim(10,0)
-            plt.imshow(heatmap[reward_th][i].reshape(args.width,args.height).permute(1,0)[:,::-1])
-            place_idx = heatmap[reward_th][i].item()
+            plt.imshow(jnp.transpose(heatmap[reward_th][i].reshape(args.width,args.height),(1,0))[::-1])
+            place_idx = jnp.argmax(heatmap[reward_th][i],axis=-1).item()
             plt.title(f'argmax:{place_idx//args.width, place_idx%args.height}')
-        plt.suptitle(f'reward position {reward_pos_traj[reward_th]}')
+        plt.suptitle(f'reward position {reward_pos_traj}')
 
 
 def display_trajectory(whole_traj:dict, no_goal_replay=False, args=None):
@@ -209,7 +208,8 @@ def main(args):
     get_reward_pos = [[] for _ in range(args.n_agents)]
     reward_pos_traj = None
     comparison_pts = jnp.zeros(args.n_agents,dtype=jnp.int32)
-    hit_total_place_since_first_meet = jnp.zeros((args.n_agents, 4),dtype=jnp.int32)# hit times and total times and the reward site(2)
+    hit_total_place_since_first_meet = jnp.zeros((args.n_agents, 4),dtype=jnp.int32)
+    # hit times and total times and the reward site(2)
     hit_info_since_first_meet = []
     # short_mid_reward_hippo = [[] for _ in range(args.n_agents)]
     ### 短路径的mid-reward-replay和所有的mid-reward-replay没有明显区别
@@ -234,7 +234,8 @@ def main(args):
         # replay_hippo_theta_output: (replay_steps, n_agents, hidden_size), (replay_steps, n_agents, hidden_size)
         hist_hippo.append(replayed_hippo_history.reshape(-1,args.hidden_size))
         # replay_step * n_agents * hidden_size
-        place_map = output_history[...,:-1]
+        num_cells = args.width*args.height
+        place_map = output_history[...,:num_cells]
         # replay_step * n_agents * hw
         max_decoding_place = jnp.argmax(output_history[...,:-1],axis=-1)
         # replay_step * n_agents
@@ -254,7 +255,7 @@ def main(args):
                     reward_theta[0].append(replayed_theta_history[:,n,:])
                 else:
                     hist_reward_pos[n].append(jnp.array((env_state['goal_pos'][n])))
-                    get_reward_pos[n].append(env_state['current_pos'][n])
+                    get_reward_pos[n].append(env_state['goal_pos'][n])
                     reward_hippo[1].append(replayed_hippo_history[:,n,:])
                     reward_theta[1].append(replayed_theta_history[:,n,:])
                     if not (reward_pos[n] == hit_total_place_since_first_meet[n][2:]).all():
@@ -268,12 +269,12 @@ def main(args):
                         hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,0].add(1)
                         # print('hit times:',hit_total_place_since_first_meet[n,0])
                         # print('total times:',hit_total_place_since_first_meet[n,1])
-                hist_replay_place[n].append(max_decoding_place[:,n]) # replay_step * hw
-                hist_replay_place_map[n].append(place_map[:,n,:])
+                hist_replay_place[n].append(max_decoding_place[:,n]) # replay_step * 1
+                hist_replay_place_map[n].append(place_map[:,n,:])# replay_step * hw
                 total_reward.append(rewards[n])
                 
             if done[n] and (args.only_agent_th==-1 or (args.only_agent_th!=-1 and n==args.only_agent_th)):
-                print('reward_pos',reward_pos[n])
+                # print('reward_pos',reward_pos[n])
                 start_p = hist_pos[n].pop()
                 start_a = hist_actions[n][-1]
                 hist_pos[n].append(env_state['goal_pos'][n])
@@ -339,12 +340,14 @@ def main(args):
                         # display_trajectory(whole_traj, args.no_goal_replay, args)
                         plot_trajectory(whole_traj, args)
                     hit_info = jnp.array(hit_info_since_first_meet)
-                    plt.suptitle('hit_percent_since_first_meet:'+str((hit_info[:,0]/hit_info[:,1]).mean()))
-                    print(hit_info)
+                    plt.suptitle('hit_percent_since_first_meet:'+str((hit_info[-20:,0]/hit_info[-20:,1]).mean()))
+                    print('hit_time/total_time:',hit_info)
+                    comparison_pts = comparison_pts.at[n].add(args.pics_per_output)
+                    print(f'agent {n},pts set to:',comparison_pts[n])
                     plt.show()
                     plt.cla()
-                    comparison_pts = comparison_pts.at[n].add(args.pics_per_output)
-                    print(comparison_pts[n])
+                    
+                    
 
             
 # （已完成，使用heatmap和argmax直接解码基本没什么区别，heatmap图中都是高斯的）把hippo_output的heatmap画出来，而不是只有argmax
@@ -433,3 +436,10 @@ if __name__ == '__main__':
 ### 改一下reward的平均方法，让它对每一次episode做平均
 ### 改一下hippo的position coding...
 ### 学一下怎么vscode连server不然太慢了...
+
+### load一下海马看一下acc_pred（正确率）
+### rewards有两个作用，一个是replay，一个是计算advantage，搞清楚他们下标之间的关系，到底是t-1还是t还是什么？？sample_from_buffer需不需要改？仔细看一下
+
+### 在每一个地方输出的reward大小画一张热力图
+### 训练一个完美的hippocampus去排除海马的变量
+### rl不mask看一下效果 ###
