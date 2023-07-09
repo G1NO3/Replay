@@ -43,25 +43,26 @@ def generate_place_cell(centers, sigma, x):
     return activation
 
 
+# @struct.dataclass
+# class Metrics(metrics.Collection):
+#     loss: metrics.Average.from_output('loss')
+#     # acc: metrics.Average.from_output('acc')
+#     loss_last: metrics.Average.from_output('loss_last')
+#     loss_pred: metrics.Average.from_output('loss_pred')
+#     # acc_0: metrics.Average.from_output('acc_0')
+#     # acc_r: metrics.Average.from_output('acc_r')
+#     # acc_g: metrics.Average.from_output('acc_g')
+#     acc_last: metrics.Average.from_output('acc_last')
+#     acc_pred: metrics.Average.from_output('acc_pred')
+
+
 @struct.dataclass
 class Metrics(metrics.Collection):
     loss: metrics.Average.from_output('loss')
     # acc: metrics.Average.from_output('acc')
     loss_last: metrics.Average.from_output('loss_last')
     loss_pred: metrics.Average.from_output('loss_pred')
-    # acc_0: metrics.Average.from_output('acc_0')
-    # acc_r: metrics.Average.from_output('acc_r')
-    # acc_g: metrics.Average.from_output('acc_g')
-    acc_last: metrics.Average.from_output('acc_last')
-    acc_pred: metrics.Average.from_output('acc_pred')
-
-
-@struct.dataclass
-class Metrics2(metrics.Collection):
-    loss: metrics.Average.from_output('loss')
-    # acc: metrics.Average.from_output('acc')
-    loss_last: metrics.Average.from_output('loss_last')
-    loss_pred: metrics.Average.from_output('loss_pred')
+    loss_dist: metrics.Average.from_output('loss_dist')
     acc_0: metrics.Average.from_output('acc_0')
     acc_r: metrics.Average.from_output('acc_r')
     acc_g: metrics.Average.from_output('acc_g')
@@ -81,7 +82,7 @@ def create_train_state(encoder, hippo, rng, init_sample, config):
     tx = optax.adamw(config.lr, weight_decay=config.wd)
     encoder_state = TrainState.create(
         apply_fn=encoder.apply, params=params, tx=tx,
-        metrics=Metrics2.empty())  # todo: metrics2
+        metrics=Metrics.empty())  # todo: metrics2
     # Initialize hippo ====================================================================
     obs_embed, action_embed = encoder_state.apply_fn({'params': params}, *init_sample)
     hidden = jnp.zeros((config.n_agents, config.hidden_size))
@@ -115,11 +116,14 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
 
     def loss_fn(params_encoder, params_hippo, hiddens, batch):
         len_t, n_agent, num_cells = batch['place_cells'].shape
+        num_rewards = batch['rewards'].shape[-1]
         apply_fn = partial(forward_fn, params_encoder, params_hippo, n_agent, bottleneck_size)
         masked_rewards = batch['rewards'].at[-1, :, :].set(0)  # todo: mask and predict the last reward
         _, all_preds = jax.lax.scan(apply_fn, hiddens, [batch['obs'], batch['action'], masked_rewards])
         preds_place = all_preds[:, :, :num_cells]
-        preds_rewards = all_preds[:, :, num_cells:]  # [t, n, 1]
+        preds_rewards = all_preds[:, :, num_cells:num_cells+num_rewards]  # [t, n, 1]
+        preds_distance = all_preds[:, :, num_cells+num_rewards:]  # [t, n, 2]
+        loss_dist = jnp.abs(preds_distance - batch['reward_distance']).mean()
         loss_pred = optax.softmax_cross_entropy(preds_place, batch['place_cells'])[:-1].mean()
         # exclude the last step of place_cell prediction
         # todo: [:-1]: not to pred the last place cell because of the masked rewards
@@ -136,9 +140,12 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
         consider_last_flag = (jnp.sum(
             jnp.where(jnp.abs(batch['rewards'] - 1) < 1e-3, 0, batch['rewards']), axis=0) > 0.6
                               ) | (rewards_label > 0.9)  # [n, 1], todo: consider: 1. gets reward twice; or 2. get goal
-        jax.debug.print('{a}_{b}', a=(jnp.sum(
-            jnp.where(jnp.abs(batch['rewards'] - 1) < 1e-3, 0, batch['rewards']), axis=0) > 0.6
-                                      ).mean(), b=(rewards_label > 0.9).mean())
+        # jax.debug.print('{a}_{b}', a=(jnp.sum(
+        #     jnp.where(jnp.abs(batch['rewards'] - 1) < 1e-3, 0, batch['rewards']), axis=0) > 0.6
+        #                               ).mean(), b=(rewards_label > 0.9).mean())
+        jnp.set_printoptions(threshold=jnp.inf)
+        jax.debug.print('rewards {shape} be like:{a}',a=batch['rewards'][:,0,:].reshape(-1,),shape=batch['rewards'].shape[0])
+        jax.debug.print('consider_last_flag:{flag}',flag=consider_last_flag)
         loss_last = jnp.where(consider_last_flag, loss_last, 0).mean()
         acc_0 = jnp.where(consider_last_flag, acc_0, 0).sum() \
                 / jnp.where((jnp.abs(rewards_label - 0.) < 1e-3) & consider_last_flag, 1, 0).sum()
@@ -146,13 +153,19 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
                 / jnp.where((jnp.abs(rewards_label - 0.5) < 1e-3) & consider_last_flag, 1, 0).sum()
         acc_g = jnp.where(consider_last_flag, acc_g, 0).sum() \
                 / jnp.where((jnp.abs(rewards_label - 1.) < 1e-3) & consider_last_flag, 1, 0).sum()
+        # jax.debug.print('direct_compare_acc_r_nominator:{a}, direct_compare_acc_g_nominator:{b}',\
+        #     a=jnp.where((jnp.abs(rewards_label - 0.5) < 1e-3) & consider_last_flag, 1, 0).sum(),\
+        #     b=jnp.where((jnp.abs(rewards_label - 1.) < 1e-3) & consider_last_flag, 1, 0).sum())
+        # jax.debug.print('isclose_acc_r_nominator:{a}, isclose_acc_g_nominator:{b}',\
+        #     a=jnp.where(jnp.isclose(rewards_label, 0.5) & consider_last_flag, 1, 0).sum(),\
+        #     b=jnp.where(jnp.isclose(rewards_label, 1.) & consider_last_flag, 1, 0).sum())
         # fixme: cumsum_rewards > 0.6, considering random reward value is 0.5, > 0.6 means the second time met a reward
 
-        loss = loss_pred + loss_last * 0.5  # todo: *0.1
-        return loss, (loss_last, loss_pred, acc_0, acc_r, acc_g, acc_pred)
+        loss = loss_pred + loss_last * 0.5 + loss_dist  # todo: *0.1
+        return loss, (loss_last, loss_pred, loss_dist, acc_0, acc_r, acc_g, acc_pred)
 
     grad_fn = jax.value_and_grad(partial(loss_fn, hiddens=hiddens, batch=batch), has_aux=True, argnums=(0, 1))
-    (loss, (loss_last, loss_pred, acc_0, acc_r, acc_g, acc_pred)), (grads_encoder, grads_hippo) = grad_fn(
+    (loss, (loss_last, loss_pred, loss_dist, acc_0, acc_r, acc_g, acc_pred)), (grads_encoder, grads_hippo) = grad_fn(
         running_encoder_state.params,
         running_hippo_state.params)
     running_encoder_state = running_encoder_state.apply_gradients(grads=grads_encoder)
@@ -171,7 +184,7 @@ def train_step(running_encoder_state, running_hippo_state, batch, sample_len, n_
 
     # compute metrics
     metric_updates = running_encoder_state.metrics.single_from_model_output(
-        loss=loss, loss_last=loss_last, loss_pred=loss_pred, acc_0=acc_0, acc_r=acc_r, acc_g=acc_g, acc_pred=acc_pred)
+        loss=loss, loss_last=loss_last, loss_pred=loss_pred, loss_dist=loss_dist, acc_0=acc_0, acc_r=acc_r, acc_g=acc_g, acc_pred=acc_pred)
     running_encoder_state = running_encoder_state.replace(metrics=metric_updates)
     return running_encoder_state, running_hippo_state
 
@@ -207,11 +220,15 @@ def sample_from_buffer(buffer_state, sample_len, n_agents, key):
     # n_agent * sample_len
     indices = (jnp.arange(sample_len).reshape(1,-1).repeat(n_agents,0) + begin_index.repeat(sample_len,axis=1)) % buffer_state['max_size']
     # buffer: xi * buffer_size * n_agents * xi_specific_dimension
+    # jax.debug.print('indices:{a}',a=indices)
     samples = [[] for _ in range(len(buffer_state['buffer']))]
     for xi in range(len(buffer_state['buffer'])):
         for agent_th in range(n_agents):
+            # jax.debug.print(f"buffer_shape:{buffer_state['buffer'][xi].shape}")
             samples[xi].append(buffer_state['buffer'][xi][indices[agent_th], agent_th])
         samples[xi] = jnp.stack(samples[xi], axis=1)
+        # jax.debug.print(f'samples:{samples[xi].shape}')
+    # jax.debug.breakpoint()
     return samples
 
 
@@ -219,6 +236,7 @@ def sample_from_buffer(buffer_state, sample_len, n_agents, key):
 
 def prepare_batch(rollouts, place_cell_state):
     # obs [t, n, h, w], actions[t, n, 1], pos[t, n, 2], rewards[t, n, 1]
+    # reward_pos [t, n, 2] goal_pos [t, n, 2]
     # t = sample_len
     batch = dict()
     batch['obs'] = rollouts[0]
@@ -227,6 +245,9 @@ def prepare_batch(rollouts, place_cell_state):
                                                                              place_cell_state['sigma'],
                                                                              rollouts[2])
     batch['rewards'] = rollouts[3]
+    mid_reward_distance = jnp.exp(-jnp.sqrt(jnp.sum((rollouts[4]-rollouts[2])**2,axis=-1)))
+    goal_distance = jnp.exp(-jnp.sqrt(jnp.sum((rollouts[5]-rollouts[2])**2,axis=-1)))
+    batch['reward_distance'] = jnp.stack((mid_reward_distance, goal_distance),axis=-1)
     return batch
 
 
@@ -273,7 +294,7 @@ def main(config):
     place_cell_state = create_place_cell_state(config.sigma, config.width, config.height)
     # Initialize model and training_state ============================
     encoder = Encoder()
-    hippo = Hippo(output_size=place_cell_state['centers'].shape[0] + 1,
+    hippo = Hippo(output_size=place_cell_state['centers'].shape[0] + 1 + 2,
                   hidden_size=config.hidden_size)
     key, subkey = jax.random.split(key)
     running_encoder_state, running_hippo_state = create_train_state(encoder, hippo, subkey,
@@ -287,10 +308,10 @@ def main(config):
         running_encoder_state = checkpoints.restore_checkpoint(ckpt_dir=config.load, target=running_encoder_state)
         running_hippo_state = checkpoints.restore_checkpoint(ckpt_dir=config.load.replace('encoder', 'hippo'),
                                                              target=running_hippo_state)
-        running_encoder_state = running_encoder_state.replace(metrics=Metrics2.empty())
+        # running_encoder_state = running_encoder_state.replace(metrics=Metrics2.empty())
     # Initialize buffer================================================
     buffer_states = create_buffer_states(max_size=config.max_size, init_sample=[obs, actions, env_state['current_pos'],
-                                                                                rewards])
+                                                                                rewards, env_state['goal_pos'], env_state['reward_center']])
 
     for ei in range(config.epoch):
         key, subkey = jax.random.split(key)
@@ -298,7 +319,7 @@ def main(config):
         obs, rewards, done, env_state = env.step(env_state, actions)
         # put_to_buffer: o_t, r_t-1, action_t-1, s_t
         buffer_states = put_to_buffer(buffer_states, [obs, actions, env_state['current_pos'],
-                                                      rewards])
+                                                      rewards, env_state['goal_pos'], env_state['reward_center']])
         # put to buffer [obs_t, a_t-1, pos_t, reward_t]
         key, subkey = jax.random.split(key)
         env_state = env.reset_reward(env_state, rewards, subkey)  # fixme: reset reward

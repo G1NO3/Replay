@@ -36,10 +36,10 @@ def add_reward(grid, key, n_agents, height, width):
         return gd.at[pos[0], pos[1]].set(2)
 
     grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x, reward_y), axis=1))  # todo
-    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x + 1, reward_y), axis=1))
-    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x - 1, reward_y), axis=1))
-    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x, reward_y + 1), axis=1))
-    grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x, reward_y - 1), axis=1))
+    # grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x + 1, reward_y), axis=1))
+    # grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x - 1, reward_y), axis=1))
+    # grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x, reward_y + 1), axis=1))
+    # grid = jax.vmap(set_r, (0, 0), 0)(grid, jnp.stack((reward_x, reward_y - 1), axis=1))
     reward_center = jnp.concatenate((reward_x, reward_y),axis=1)
     return grid, reward_center
 
@@ -72,16 +72,19 @@ def take_action(actions, current_pos, grid, goal_pos):
                                              jnp.where(actions == 3, current_pos - jnp.array([0, 1]),
                                                        current_pos))))
     # next_pos [n, 2]
+    # knock_wall = next_pos[:,0] > grid.shape[1]-1 or next_pos[:,0] < 0 \
+    #             or next_pos[:,1] > grid.shape[2]-1 or next_pos[:,1] < 0
+    # knocked = jnp.where(knock_wall, -0.3, 0)
     next_pos = jnp.clip(next_pos, 0, jnp.array([grid.shape[1] - 1, grid.shape[2] - 1]))
 
     hit = jax.vmap(fetch_pos, (0, 0), 0)(grid, next_pos)
     hit = hit.reshape((-1, 1))
     blocked = jnp.where(hit == 1, -1, 0)
     rewarded = jnp.where(hit == 2, 0.5, 0)
-    # step_punishment = -jnp.ones((actions.shape[0],1))*0.03
+    # step_punishment = -jnp.ones((actions.shape[0],1))*0.02
 
     rewards = jnp.where(jnp.all(next_pos == goal_pos, axis=1, keepdims=True), 1, 0) + blocked + rewarded\
-                # + step_punishment
+                # + knock_wall
     done = jnp.all(next_pos == goal_pos, axis=1)
     return next_pos, rewards, done, blocked
 

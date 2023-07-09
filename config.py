@@ -5,8 +5,8 @@ Config for path_int.py
 # env
 width = 8
 height = 8
-n_agents = 2048  # batch_size
-sigma = 2.  # the std of place cell
+n_agents = 2  # batch_size
+sigma = 1.  # the std of place cell
 visual_prob = 1.  # the prob that obs is not masked to zero
 
 # network
@@ -16,9 +16,9 @@ bottleneck_size = 8  # the dim of pfc's input to hippo
 # optimizer
 lr = 1e-4
 wd = 1e-3
-epoch = int(3e6)
+epoch = int(1e5)
 train_every = 16
-sample_len = 256
+sample_len = 64
 
 # buffer
 max_size = 20000
