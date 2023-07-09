@@ -199,6 +199,7 @@ def main(args):
     hist_replay_place = [[] for _ in range(args.n_agents)]
     hist_replay_place_map = [[] for _ in range(args.n_agents)]
     hist_actions = [[] for _ in range(args.n_agents)]
+    hist_rewards = [[] for _ in range(args.n_agents)]
     hist_hippo = []
     reward_hippo = [[],[]]
     reward_theta = [[],[]]
@@ -245,7 +246,8 @@ def main(args):
                 continue
             hist_actions[n].append(actions[n])
             hist_pos[n].append(env_state['current_pos'][n])
-            
+            hist_rewards[n].append(rewards[n])
+            # print('hist_actions')
             if rewards[n]:
                 # including mid_reward and goal
                 if not jnp.isclose(rewards[n],1):
@@ -291,7 +293,7 @@ def main(args):
                 interest_condition = (not args.only_reward_trajectory \
                     or (args.only_reward_trajectory and len(hist_reward_pos[n])>1))
                 if interest_condition:
-                    state_traj = jnp.concatenate((jnp.stack(hist_pos[n],axis=0),jnp.stack(hist_actions[n],axis=0)),axis=1)
+                    state_traj = jnp.concatenate((jnp.stack(hist_pos[n],axis=0),jnp.stack(hist_actions[n],axis=0),jnp.stack(hist_rewards[n])),axis=1)
                     reward_pos_traj = jnp.stack(hist_reward_pos[n],axis=0)
 
                     whole_traj = {'agent_th':n, 'state_traj':state_traj, 'replay_traj':hist_replay_place[n], \
@@ -315,6 +317,7 @@ def main(args):
                         total_replay_distance_scope[0].append(replay_distance)
                         total_replay_distance_scope[1].append(replay_scope)
                 hist_pos[n] = [start_p]
+                hist_rewards[n] = [jnp.zeros(1)]
                 hist_reward_pos[n] = []
                 hist_replay_place[n] = []
                 hist_replay_place_map[n] = []
@@ -340,7 +343,7 @@ def main(args):
                         # display_trajectory(whole_traj, args.no_goal_replay, args)
                         plot_trajectory(whole_traj, args)
                     hit_info = jnp.array(hit_info_since_first_meet)
-                    plt.suptitle('hit_percent_since_first_meet:'+str((hit_info[-20:,0]/hit_info[-20:,1]).mean()))
+                    plt.suptitle('hit_percent_since_first_meet:'+str((hit_info[-args.hit_len:,0]/hit_info[-args.hit_len:,1]).mean()))
                     print('hit_time/total_time:',hit_info)
                     comparison_pts = comparison_pts.at[n].add(args.pics_per_output)
                     print(f'agent {n},pts set to:',comparison_pts[n])
@@ -413,15 +416,16 @@ if __name__ == '__main__':
     parser.add_argument('--only_agent_th','-ag', type=int, default=-1)
     parser.add_argument('--only_reward_trajectory', '-r', action='store_true' ,default=False)
     parser.add_argument('--output_dimension_reduction', '-d', action='store_true', default=False)
-    parser.add_argument('--epochs_per_output', '-ep', type=int, default=30,
+    parser.add_argument('--epochs_per_output', '-dp', type=int, default=30,
                         help='how many epochs before output of dimension reduction')
     parser.add_argument('--no_replay', action='store_true', default=False)
     parser.add_argument('--no_goal_replay', action='store_true', default=False)
     parser.add_argument('--output_heatmap', action='store_true', default=False)
     parser.add_argument('--output_comparison', '-c', action='store_true', default=False,
                         help='whether to output continuous trajectories of one agent')
-    parser.add_argument('--pics_per_output','-pp',type=int, default=4,
+    parser.add_argument('--pics_per_output','-cp',type=int, default=20,
                         help='how many trajectories to be showed of one agent in output')
+    parser.add_argument('--hit_len', type=int, default=30)
 
 
     args = parser.parse_args()

@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
+# from sklearn.decomposition import PCA
 import matplotlib as mpl
 # hist_pos = [[1,2],[2,1],[0,0]]
 # b = jnp.zeros((3,3))
@@ -58,6 +58,59 @@ import matplotlib as mpl
 # norm = mpl.colors.Normalize(vmin=0, vmax=4)
 # fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=newcmap))
 # plt.show()
-a = jnp.zeros(4,dtype=jnp.int32)
-b = 1e-9
-print(jnp.isclose(a,b))
+
+# batch = {'obs_embed': batch[0], 'action_embed': batch[1], 'his_hippo_hidden': batch[2], 'his_theta': batch[3],
+#             'his_rewards': batch[4], 'his_action': batch[5], 'his_logits': batch[6], 'his_values': batch[7]
+#             }
+# for k in batch:
+#     print(k)
+#     print(batch[k])
+#     if batch[k] == 'his_rewards':  # fixme: his_rewards is of t-1, align it with other
+#         batch[k] = batch[k][1:]
+#     else:
+#         batch[k] = batch[k][:-1]
+# print(batch)
+
+# key = jax.random.PRNGKey(0)
+# key, subkey = jax.random.split(key)
+# # a = jax.random.randint(key, (2,3,4),0,3)
+# # b = jax.random.randint(subkey, (2,3,4),0,3)
+# a = jnp.ones((2,3,4))
+# b = jnp.ones((2,3,4))*2
+# def addone(xy,xs):
+#     x, y = xy
+#     return (x+1,y+2),(x+1,y+2)
+# (_a,_b), c = jax.lax.scan(addone,init=(a,b),xs=None,length=8)
+# print(c[0].shape)
+
+# replay_fn_to_scan = partial(replay_fn_for_seq, policy_params=policy_params,
+#                             hippo_state=hippo_state, policy_state=policy_state,
+#                             n_agents=n_agents,
+#                             obs_embed_size=batch['obs_embed'].shape[-1],
+#                             action_embed_size=batch['action_embed'].shape[-1])
+# (_, his_replayed_theta), _ = jax.lax.scan(replay_fn_to_scan,
+#                                             init=(batch['his_hippo_hidden'], batch['his_theta']),
+#                                             xs=None, length=replay_steps)
+
+
+# @partial(jax.jit, static_argnums=(5, 6, 7))
+# def replay_fn_for_seq(hippo_and_theta, xs, policy_params, hippo_state, policy_state,
+#                       n_agents, obs_embed_size, action_embed_size):
+#     # the only difference with replay_fn is that this func replays for whole seq [t, ..., ...]
+#     # to match the input/output stream of jax.lax.scan
+#     # and also need to calculate grad of policy_params
+#     hippo_hidden, theta = hippo_and_theta
+#     new_theta, (policy, value, to_hipp) = policy_state.apply_fn({'params': policy_params},
+#                                                                 theta, jnp.zeros(
+#             (hippo_hidden.shape[0], n_agents, obs_embed_size)),
+#                                                                 hippo_hidden)
+#     new_hippo_hidden, _ = hippo_state.apply_fn({'params': hippo_state.params},
+#                                                hippo_hidden, to_hipp,
+#                                                (jnp.zeros((hippo_hidden.shape[0], n_agents, obs_embed_size)),
+#                                                 jnp.zeros((hippo_hidden.shape[0], n_agents, action_embed_size))),
+#                                                jnp.zeros((hippo_hidden.shape[0], n_agents, 1)))
+#     return (new_hippo_hidden, new_theta), (new_hippo_hidden, new_theta)
+
+a = 0.
+b = jnp.sqrt((((a+5)/2-2.5+1.2)**2-1.4))-0.2
+print(b)

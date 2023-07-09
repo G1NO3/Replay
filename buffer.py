@@ -40,11 +40,11 @@ def sample_from_buffer(buffer_state, sample_len, key):
     batch = {'obs_embed': batch[0], 'action_embed': batch[1], 'his_hippo_hidden': batch[2], 'his_theta': batch[3],
              'his_rewards': batch[4], 'his_action': batch[5], 'his_logits': batch[6], 'his_values': batch[7]
              }
-    for k in batch:
-        if batch[k] == 'his_rewards':  # fixme: his_rewards is of t-1, align it with other
-            batch[k] = batch[k][1:]
-        else:
-            batch[k] = batch[k][:-1]
+    # for k in batch:
+    #     if k == 'his_rewards':  # fixme: his_rewards is of t-1, align it with other
+    #         batch[k] = batch[k][1:]
+    #     else:
+    #         batch[k] = batch[k][:-1]
     return batch
 
 

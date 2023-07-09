@@ -7,14 +7,14 @@ width = 8
 height = 8
 n_agents = 2048  # batch_size
 sigma = 2.  # the std of place cell
-visual_prob = 0.05  # the prob that obs is not masked to zero
+visual_prob = 1.  # the prob that obs is not masked to zero
 
 # network
 hidden_size = 128  # hidden_size of hippo campus state
 bottleneck_size = 8  # the dim of pfc's input to hippo
 
 # optimizer
-lr = 5e-4
+lr = 1e-4
 wd = 1e-3
 epoch = int(3e6)
 train_every = 16

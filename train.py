@@ -9,7 +9,7 @@ import optax
 from flax import struct  # Flax dataclasses
 from clu import metrics
 from tensorboardX import SummaryWriter
-
+from flax.traverse_util import flatten_dict, unflatten_dict
 import env
 from agent import Encoder, Hippo, Policy
 from flax.training import train_state, checkpoints
@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument('--width', type=int, default=8)
     parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
-    parser.add_argument('--visual_prob', type=float, default=0.05)
+    parser.add_argument('--visual_prob', type=float, default=1.)
     parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_2995000')  # todo: checkpoint
     parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_2995000')
     parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_995001')
@@ -107,6 +107,7 @@ def train_step(state, batch, sample_len, n_agents, hidden_size, replay_steps, cl
 
         _, his_replayed_theta = jax.lax.scan(propagate_theta, init=batch['his_theta'][0], xs=(batch['his_rewards'],
                                                                                               his_replayed_theta))
+        # theta(t) = f(r(t-1), theta(t))
         # todo: propagate theta
         # his_replayed_theta = jnp.where(batch['his_rewards'] > 0, his_replayed_theta, batch['his_theta'])
         # using scan instead of jnp.where to ensure that gradients of each action should affect the invariable theta 
@@ -123,16 +124,21 @@ def train_step(state, batch, sample_len, n_agents, hidden_size, replay_steps, cl
         policy_logits, value = jax.vmap(forward_fn1, (0, 0, 0), (0, 0))(his_replayed_theta,
                                                                         batch['obs_embed'],
                                                                         jnp.zeros_like(batch['his_hippo_hidden']))
+        policy_logits = policy_logits[:-1]
+        value = value[:-1]
+
+        # a(t), v(t) = f(theta(t), o(t))
+        # 实际上这里应该是o(t-1)
         # the pfc cannot see hippo during walk
         # policy_logits_t[t, n, 4], value_t[t, n, 1]
 
         # 3. PPO =========================================================================================
         ratio = jnp.exp(
-            jax.nn.log_softmax(policy_logits, axis=-1) - jax.nn.log_softmax(batch['his_logits'], axis=-1))  # [t, n, 4]
+            jax.nn.log_softmax(policy_logits, axis=-1) - jax.nn.log_softmax(batch['his_logits'][:-1], axis=-1))  # [t, n, 4]
         t, n, _ = ratio.shape
         index_t = jnp.repeat(jnp.arange(0, t).reshape((t, 1)), repeats=n, axis=-1).reshape((t, n, 1))
         index_n = jnp.repeat(jnp.arange(0, n).reshape((1, n)), repeats=t, axis=0).reshape((t, n, 1))
-        index_action = jnp.concatenate((index_t, index_n, batch['his_action']), axis=-1)  # [n, 3]
+        index_action = jnp.concatenate((index_t, index_n, batch['his_action'][:-1]), axis=-1)  # [n, 3]
         ratio = jax.lax.gather(ratio, start_indices=index_action,
                                dimension_numbers=jax.lax.GatherDimensionNumbers(offset_dims=(2,),
                                                                                 collapsed_slice_dims=(0, 1),
@@ -143,14 +149,14 @@ def train_step(state, batch, sample_len, n_agents, hidden_size, replay_steps, cl
         # #     assert ((ratio < 1 + 1e-3) & (ratio > 1 - 1e-3)).float().mean() > 0.999, (ratio.max(), ratio.min())
         approx_kl = ((ratio - 1) - jnp.log(ratio)).mean()
         # -----------------------------------------------------
-        advantage = batch['his_traced_rewards'] - batch['his_values']  # [t, n, 1]
+        advantage = batch['his_traced_rewards'][1:] - batch['his_values'][:-1]  # [t, n, 1]
         surr1 = ratio * advantage
         surr2 = jnp.clip(ratio, 1.0 - clip_param,
                          1.0 + clip_param) * advantage
         action_loss = -jnp.minimum(surr1, surr2).mean()
         entropy_loss = - (jax.nn.log_softmax(policy_logits, axis=-1) * jax.nn.softmax(policy_logits, axis=-1)).sum(
             axis=-1).mean()
-        value_loss = ((value - batch['his_traced_rewards']) ** 2).mean()
+        value_loss = ((value - batch['his_traced_rewards'][1:]) ** 2).mean()
 
         loss = action_loss - entropy_loss * entropy_coef + 0.5 * value_loss
 
@@ -160,7 +166,9 @@ def train_step(state, batch, sample_len, n_agents, hidden_size, replay_steps, cl
         grad_fn = jax.value_and_grad(partial(loss_fn, batch=batch), has_aux=True)
         (loss, (action_loss, entropy_loss, value_loss, approx_kl)), grad = grad_fn(policy_state.params)
 
-        clip_fn = lambda z: jnp.clip(z, -5.0, 5.0)  # fixme: clip by value / by grad
+        clip_fn = lambda z: z / jnp.maximum(jnp.linalg.norm(z,ord=2), 5.0) * 5  # fixme: clip by value / by grad
+        jax.debug.breakpoint()
+        jax.debug.print('grad_{a}', a=jnp.linalg.norm(grad['Dense_0']['kernel'], ord=2))
         grad = jax.tree_util.tree_map(clip_fn, grad)
         policy_state = policy_state.apply_gradients(grads=grad)
 
@@ -284,6 +292,7 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
                plot_args=None):
     # Input: actions_t-1, h_t-1, theta_t-1,
     obs, rewards, done, env_state = env.step(env_state, actions)  # todo: reset
+    # o(t), r(t-1) = f(o(t-1),a(t-1))
     key, subkey = jax.random.split(key)
     env_state = env.reset_reward(env_state, rewards, subkey)  # fixme: reset reward with 0.9 prob
     # Mask obs ==========================================================================================
@@ -337,6 +346,7 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
     # jax.debug.print('obs{a}_actions_{b}_theta_{c}_rewards_{d}_newa_{e}',
     #                 a=env_state['current_pos'][0], b=actions[0], c=theta.mean(), d=rewards[0],
     #                 e=new_actions[0])
+    # jax.debug.breakpoint()
     return env_state, buffer_state, new_actions, new_hippo_hidden, replayed_theta, rewards, done, replayed_history
     # return action_t, h_t, theta_t (after replay), rewards_t-1 (for logging)
 
@@ -356,7 +366,7 @@ def eval_steps(env_state, buffer_state, running_encoder_state, running_hippo_sta
         all_rewards.append(rewards.mean().item())
     return sum(all_rewards) / len(all_rewards)
 
-
+##### 把r(t-1)改成r(t)
 @partial(jax.jit, static_argnums=(1,))
 def trace_back(rewards, gamma):
     # rewards [t, n, 1], carry, y = f(carry, x)
@@ -372,8 +382,9 @@ def trace_back(rewards, gamma):
         return gn_prime, gn_prime
 
     _, all_v = jax.lax.scan(trace_a_step, jnp.zeros((n, 1)), jnp.flip(rewards, axis=0))
-    _, exp_gamma = jax.lax.scan(trace_gamma, jnp.zeros((1, 1)), xs=None, length=t)
-    all_v = jnp.flip(all_v, axis=0) / jnp.flip(exp_gamma, axis=0)
+    # _, exp_gamma = jax.lax.scan(trace_gamma, jnp.zeros((1, 1)), xs=None, length=t)
+    # all_v = jnp.flip(all_v, axis=0) / jnp.flip(exp_gamma, axis=0)
+    all_v = jnp.flip(all_v, axis=0)
     return all_v
 
 
@@ -408,6 +419,11 @@ def main(args):
             key, subkey = jax.random.split(key)
             batch = buffer.sample_from_buffer(buffer_state, args.sample_len, subkey)
             batch['his_traced_rewards'] = trace_back(batch['his_rewards'], args.gamma)
+            # for k in batch:
+            #     if k == 'his_traced_rewards':  # fixme: his_rewards is of t-1, align it with other
+            #         batch[k] = batch[k][1:]
+            #     else:
+            #         batch[k] = batch[k][:-1]
             # for k in batch:
             #     print(k, batch[k].shape)
             running_policy_state = train_step((running_encoder_state, running_hippo_state, running_policy_state),

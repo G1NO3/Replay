@@ -78,8 +78,10 @@ def take_action(actions, current_pos, grid, goal_pos):
     hit = hit.reshape((-1, 1))
     blocked = jnp.where(hit == 1, -1, 0)
     rewarded = jnp.where(hit == 2, 0.5, 0)
+    # step_punishment = -jnp.ones((actions.shape[0],1))*0.03
 
-    rewards = jnp.where(jnp.all(next_pos == goal_pos, axis=1, keepdims=True), 1, 0) + blocked + rewarded
+    rewards = jnp.where(jnp.all(next_pos == goal_pos, axis=1, keepdims=True), 1, 0) + blocked + rewarded\
+                # + step_punishment
     done = jnp.all(next_pos == goal_pos, axis=1)
     return next_pos, rewards, done, blocked
 
