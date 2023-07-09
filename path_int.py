@@ -49,19 +49,6 @@ class Metrics(metrics.Collection):
     # acc: metrics.Average.from_output('acc')
     loss_last: metrics.Average.from_output('loss_last')
     loss_pred: metrics.Average.from_output('loss_pred')
-    # acc_0: metrics.Average.from_output('acc_0')
-    # acc_r: metrics.Average.from_output('acc_r')
-    # acc_g: metrics.Average.from_output('acc_g')
-    acc_last: metrics.Average.from_output('acc_last')
-    acc_pred: metrics.Average.from_output('acc_pred')
-
-
-@struct.dataclass
-class Metrics2(metrics.Collection):
-    loss: metrics.Average.from_output('loss')
-    # acc: metrics.Average.from_output('acc')
-    loss_last: metrics.Average.from_output('loss_last')
-    loss_pred: metrics.Average.from_output('loss_pred')
     acc_0: metrics.Average.from_output('acc_0')
     acc_r: metrics.Average.from_output('acc_r')
     acc_g: metrics.Average.from_output('acc_g')
@@ -81,7 +68,7 @@ def create_train_state(encoder, hippo, rng, init_sample, config):
     tx = optax.adamw(config.lr, weight_decay=config.wd)
     encoder_state = TrainState.create(
         apply_fn=encoder.apply, params=params, tx=tx,
-        metrics=Metrics2.empty())  # todo: metrics2
+        metrics=Metrics.empty())  # todo: metrics2
     # Initialize hippo ====================================================================
     obs_embed, action_embed = encoder_state.apply_fn({'params': params}, *init_sample)
     hidden = jnp.zeros((config.n_agents, config.hidden_size))
@@ -287,7 +274,6 @@ def main(config):
         running_encoder_state = checkpoints.restore_checkpoint(ckpt_dir=config.load, target=running_encoder_state)
         running_hippo_state = checkpoints.restore_checkpoint(ckpt_dir=config.load.replace('encoder', 'hippo'),
                                                              target=running_hippo_state)
-        running_encoder_state = running_encoder_state.replace(metrics=Metrics2.empty())
     # Initialize buffer================================================
     buffer_states = create_buffer_states(max_size=config.max_size, init_sample=[obs, actions, env_state['current_pos'],
                                                                                 rewards])

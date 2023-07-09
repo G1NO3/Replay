@@ -60,7 +60,7 @@ def set_pos(grid, pos, value):
 def prepare_obs(grid, current_pos):
     # obs: can see self.current pos, but cannot see rewards
     obs = jax.vmap(set_pos, (0, 0, None), 0)(grid, current_pos, 3)
-    obs = jnp.where(obs == 2, 0, obs)
+    # obs = jnp.where(obs == 2, 0, obs)
     return obs
 
 
