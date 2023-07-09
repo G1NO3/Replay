@@ -25,4 +25,4 @@ max_size = 20000
 
 # other
 save_name = 'env8'
-load = 'modelzoo/env8_encoder/checkpoint_385000'
+load = './modelzoo/env8_encoder/checkpoint_385000'

@@ -208,6 +208,10 @@ def init_states(args, key, random_reset=False):
         apply_fn=encoder.apply, params=params, tx=optax.adamw(0.0, weight_decay=0.0),
         metrics=path_int.Metrics2.empty())
     if not random_reset:
+        if args.load_encoder[2:] in os.listdir():
+            print('load encoder from:', args.load_encoder)
+        else:
+            print('randomly initialize encoder')
         running_encoder_state = checkpoints.restore_checkpoint(ckpt_dir=args.load_encoder,
                                                             target=running_encoder_state)
     # Load Hippo ===========================================================================
@@ -223,6 +227,10 @@ def init_states(args, key, random_reset=False):
         apply_fn=hippo.apply, params=params, tx=optax.adamw(0.0, weight_decay=0.0),
         metrics=path_int.Metrics.empty())
     if not random_reset:
+        if args.load_hippo[2:] in os.listdir():
+            print('load hippo from:', args.load_hippo)
+        else:
+            print('randomly initialize hippo')
         running_hippo_state = checkpoints.restore_checkpoint(ckpt_dir=args.load_hippo,
                                                             target=running_hippo_state)
     # todo: make sure the load is successful
@@ -235,6 +243,10 @@ def init_states(args, key, random_reset=False):
         apply_fn=policy.apply, params=params, tx=optax.adamw(args.lr, weight_decay=args.wd),
         metrics=Metrics.empty())
     if not random_reset:
+        if args.load_policy[2:] in os.listdir():
+            print('load policy from:', args.load_policy)
+        else:
+            print('randomly initialize policy')
         running_policy_state = checkpoints.restore_checkpoint(ckpt_dir=args.load_policy,
                                                               target=running_policy_state)
     # ===============================================

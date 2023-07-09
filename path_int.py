@@ -14,7 +14,7 @@ from flax.traverse_util import flatten_dict, unflatten_dict
 import optax  # Common loss functions and optimizers
 from jax import xla_computation
 from tensorboardX import SummaryWriter
-
+import os
 import env
 from agent import Encoder, Hippo
 import config
@@ -280,11 +280,14 @@ def main(config):
                                                                     (obs, actions),
                                                                     config)
     if config.load != '':
+        if config.load[2:] in os.listdir():
+            print('successfully load from:', config.load)
+        else:
+            print('randomly initialized')
         running_encoder_state = checkpoints.restore_checkpoint(ckpt_dir=config.load, target=running_encoder_state)
         running_hippo_state = checkpoints.restore_checkpoint(ckpt_dir=config.load.replace('encoder', 'hippo'),
                                                              target=running_hippo_state)
         running_encoder_state = running_encoder_state.replace(metrics=Metrics2.empty())
-        print('load from', config.load)
     # Initialize buffer================================================
     buffer_states = create_buffer_states(max_size=config.max_size, init_sample=[obs, actions, env_state['current_pos'],
                                                                                 rewards])
