@@ -49,7 +49,8 @@ def plot_trajectory(whole_traj:dict,args):
     plt.plot(state_traj[:,0],state_traj[:,1])
     plot_replay(replay_traj[:-1], 'blue', args)
     plot_replay(replay_traj[-1:], 'red', args)
-    plt.scatter(reward_pos_traj[:,0],reward_pos_traj[:,1], marker='*', s=100, c='r')
+    if reward_pos_traj is not None:
+        plt.scatter(reward_pos_traj[:,0],reward_pos_traj[:,1], marker='*', s=100, c='r')
 
 def plot_heatmap(reward_pos_traj, heatmap, args):
     # reward_th * replay_step * hw
@@ -215,7 +216,6 @@ def main(args):
     # short_mid_reward_hippo = [[] for _ in range(args.n_agents)]
     ### 短路径的mid-reward-replay和所有的mid-reward-replay没有明显区别
     # 0 for mid-path reward replay and 1 for goal replay
-
     for ei in range(args.epochs):
         # walk in the env and update buffer (model_step)
         if ei%30==0:
@@ -274,7 +274,20 @@ def main(args):
                 hist_replay_place[n].append(max_decoding_place[:,n]) # replay_step * 1
                 hist_replay_place_map[n].append(place_map[:,n,:])# replay_step * hw
                 total_reward.append(rewards[n])
-                
+            if n == args.mid_spec_agent_th and ei % args.steps_per_output == 0:
+                state_traj = jnp.concatenate((jnp.stack(hist_pos[n],axis=0),jnp.stack(hist_actions[n],axis=0),jnp.stack(hist_rewards[n])),axis=1)
+                if hist_reward_pos[n]:
+                    reward_pos_traj = jnp.stack(hist_reward_pos[n],axis=0)
+                else:
+                    reward_pos_traj = None
+                whole_traj = {'agent_th':n, 'state_traj':state_traj, 'replay_traj':hist_replay_place[n], \
+                    'reward_pos_traj':reward_pos_traj, 'get_reward_pos_traj':get_reward_pos[n]}
+                display_trajectory(whole_traj, False, args)
+                plot_trajectory(whole_traj, args)
+                plt.show()
+                plt.cla()
+            
+
             if done[n] and (args.only_agent_th==-1 or (args.only_agent_th!=-1 and n==args.only_agent_th)):
                 # print('reward_pos',reward_pos[n])
                 start_p = hist_pos[n].pop()
@@ -284,8 +297,8 @@ def main(args):
                 if hit_total_place_since_first_meet[n,0]!=0:
                     hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,1].add(1)
                     if not (reward_pos[n] == hit_total_place_since_first_meet[n,2:]).all():
-                        print('hit_times',hit_total_place_since_first_meet[n,0])
-                        print('total_times',hit_total_place_since_first_meet[n,1])
+                        # print('hit_times',hit_total_place_since_first_meet[n,0])
+                        # print('total_times',hit_total_place_since_first_meet[n,1])
                         hit_info_since_first_meet.append((hit_total_place_since_first_meet[n,0],hit_total_place_since_first_meet[n,1]))
                         hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,0].set(0)
                         hit_total_place_since_first_meet = hit_total_place_since_first_meet.at[n,1].set(0)
@@ -404,7 +417,7 @@ if __name__ == '__main__':
     parser.add_argument('--width', type=int, default=8)
     parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
-    parser.add_argument('--visual_prob', type=float, default=0.05)
+    parser.add_argument('--visual_prob', type=float, default=1)
     parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_995000')  # todo: checkpoint
     parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_995000')
     parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_995001')
@@ -426,6 +439,9 @@ if __name__ == '__main__':
     parser.add_argument('--pics_per_output','-cp',type=int, default=20,
                         help='how many trajectories to be showed of one agent in output')
     parser.add_argument('--hit_len', type=int, default=30)
+    parser.add_argument('--mid_spec_agent_th', '-mn', type=int, default=-1)
+    parser.add_argument('--steps_per_output', '-mp', type=int, default=5)
+    
 
 
     args = parser.parse_args()

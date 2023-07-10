@@ -44,9 +44,9 @@ def parse_args():
     parser.add_argument('--width', type=int, default=8)
     parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
-    parser.add_argument('--visual_prob', type=float, default=1.)
-    parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_2995000')  # todo: checkpoint
-    parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_2995000')
+    parser.add_argument('--visual_prob', type=float, default=.05)
+    parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_995000')  # todo: checkpoint
+    parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_995000')
     parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_995001')
 
     parser.add_argument('--hidden_size', type=int, default=128)
@@ -167,7 +167,7 @@ def train_step(state, batch, sample_len, n_agents, hidden_size, replay_steps, cl
         (loss, (action_loss, entropy_loss, value_loss, approx_kl)), grad = grad_fn(policy_state.params)
 
         clip_fn = lambda z: z / jnp.maximum(jnp.linalg.norm(z,ord=2), 5.0) * 5  # fixme: clip by value / by grad
-        jax.debug.breakpoint()
+        # jax.debug.breakpoint()
         jax.debug.print('grad_{a}', a=jnp.linalg.norm(grad['Dense_0']['kernel'], ord=2))
         grad = jax.tree_util.tree_map(clip_fn, grad)
         policy_state = policy_state.apply_gradients(grads=grad)
