@@ -238,7 +238,7 @@ def main(args):
         num_cells = args.width*args.height
         place_map = output_history[...,:num_cells]
         # replay_step * n_agents * hw
-        max_decoding_place = jnp.argmax(output_history[...,:-1],axis=-1)
+        max_decoding_place = jnp.argmax(output_history[...,:num_cells],axis=-1)
         # replay_step * n_agents
         
         for n in range(args.n_agents):
