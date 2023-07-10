@@ -56,9 +56,9 @@ def plot_heatmap(reward_pos_traj, heatmap, args):
     for reward_th in range(len(heatmap)):
         for i in range(args.replay_steps):
             plt.subplot(2,4,i+1)
-            plt.imshow(jnp.transpose(heatmap[reward_th][i].reshape(args.width,args.height),(1,0))[::-1])
+            plt.imshow(jnp.transpose(heatmap[reward_th][i].reshape(args.width,args.height),(1,0)),origin='lower')
             place_idx = jnp.argmax(heatmap[reward_th][i],axis=-1).item()
-            plt.title(f'argmax:{place_idx//args.width, place_idx%args.height}')
+            plt.title(f'argmax:{place_idx//args.width, place_idx%args.width}')
         plt.suptitle(f'reward position {reward_pos_traj}')
 
 
@@ -405,8 +405,8 @@ if __name__ == '__main__':
     parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
     parser.add_argument('--visual_prob', type=float, default=0.05)
-    parser.add_argument('--load_encoder', type=str, default='./modelzoo/r_input_encoder/env8_2995000')  # todo: checkpoint
-    parser.add_argument('--load_hippo', type=str, default='./modelzoo/r_input_hippo/env8_2995000')
+    parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_995000')  # todo: checkpoint
+    parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_995000')
     parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_995001')
     parser.add_argument('--hidden_size', type=int, default=128)
 
@@ -420,7 +420,7 @@ if __name__ == '__main__':
                         help='how many epochs before output of dimension reduction')
     parser.add_argument('--no_replay', action='store_true', default=False)
     parser.add_argument('--no_goal_replay', action='store_true', default=False)
-    parser.add_argument('--output_heatmap', action='store_true', default=False)
+    parser.add_argument('--output_heatmap', '-map', action='store_true', default=False)
     parser.add_argument('--output_comparison', '-c', action='store_true', default=False,
                         help='whether to output continuous trajectories of one agent')
     parser.add_argument('--pics_per_output','-cp',type=int, default=20,
