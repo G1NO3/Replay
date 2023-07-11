@@ -44,10 +44,10 @@ def parse_args():
     parser.add_argument('--width', type=int, default=8)
     parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
-    parser.add_argument('--visual_prob', type=float, default=.05)
+    parser.add_argument('--visual_prob', type=float, default=0.05)
     parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_995000')  # todo: checkpoint
     parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_995000')
-    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_995001')
+    parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_495001')
 
     parser.add_argument('--hidden_size', type=int, default=128)
     args = parser.parse_args()
@@ -85,7 +85,7 @@ def train_step(state, batch, sample_len, n_agents, hidden_size, replay_steps, cl
 
     def loss_fn(policy_params, batch):
         # his_theta [l, n, h]
-        # obs_embed [l, n, 48], action_embed [l, n, 4]
+        # obs_embed [l, n, 64], action_embed [l, n, 4]
         # his_action [l, n, 1], his_logits [l, n, 4], his_rewards [l, n, 1], his_values[l, n, 1]
         # his_traced_rewards [l, n, 1]
 
@@ -304,22 +304,21 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
                plot_args=None):
     # Input: actions_t-1, h_t-1, theta_t-1,
     obs, rewards, done, env_state = env.step(env_state, actions)  # todo: reset
+    obs_embed_for_hippo = encoder_state.apply_fn({'params': encoder_state.params}, obs, actions)
     # o(t), r(t-1) = f(o(t-1),a(t-1))
     key, subkey = jax.random.split(key)
     env_state = env.reset_reward(env_state, rewards, subkey)  # fixme: reset reward with 0.9 prob
     # Mask obs ==========================================================================================
     key, subkey = jax.random.split(key)
     mask = jax.random.uniform(subkey, (obs.shape[0], 1, 1))
-    # mask = mask.at[0,...].set(0)
-    obs = jnp.where(mask < visual_prob, obs, 0)
+    obs_incomplete = jnp.where(mask < visual_prob, obs, 0)
     # obs[n, h, w], actions[n, 1], rewards[n, 1]
     # Encode obs and a_t-1 ===============================================================================
-    obs_embed, action_embed = encoder_state.apply_fn({'params': encoder_state.params}, obs, actions)
-
+    obs_embed, action_embed = encoder_state.apply_fn({'params': encoder_state.params}, obs_incomplete, actions)
     # Update hippo_hidden ==================================================================================
     new_hippo_hidden, _ = hippo_state.apply_fn({'params': hippo_state.params},
                                                hippo_hidden, jnp.zeros((n_agents, bottleneck_size)),
-                                               (obs_embed, action_embed), rewards)
+                                               (obs_embed_for_hippo, action_embed), rewards)
 
     # Replay, only when rewards > 0 ===============================================================
     if plot_args is not None:
@@ -431,13 +430,6 @@ def main(args):
             key, subkey = jax.random.split(key)
             batch = buffer.sample_from_buffer(buffer_state, args.sample_len, subkey)
             batch['his_traced_rewards'] = trace_back(batch['his_rewards'], args.gamma)
-            # for k in batch:
-            #     if k == 'his_traced_rewards':  # fixme: his_rewards is of t-1, align it with other
-            #         batch[k] = batch[k][1:]
-            #     else:
-            #         batch[k] = batch[k][:-1]
-            # for k in batch:
-            #     print(k, batch[k].shape)
             running_policy_state = train_step((running_encoder_state, running_hippo_state, running_policy_state),
                                               batch,
                                               args.sample_len, args.n_agents, args.hidden_size, args.replay_steps,

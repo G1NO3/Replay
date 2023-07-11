@@ -73,7 +73,7 @@ def take_action(actions, current_pos, grid, goal_pos):
                                                        current_pos))))
     # next_pos [n, 2]
     next_pos = jnp.clip(next_pos, 0, jnp.array([grid.shape[1] - 1, grid.shape[2] - 1]))
-    knocked_wall = jnp.where(next_pos == current_pos, -1., 0)
+    knocked_wall = jnp.where((next_pos == current_pos).all(axis=-1), -1., 0).reshape(-1,1)
     hit = jax.vmap(fetch_pos, (0, 0), 0)(grid, next_pos)
     hit = hit.reshape((-1, 1))
     blocked = jnp.where(hit == 1, -1, 0)
