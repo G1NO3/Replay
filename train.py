@@ -304,7 +304,7 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
                plot_args=None):
     # Input: actions_t-1, h_t-1, theta_t-1,
     obs, rewards, done, env_state = env.step(env_state, actions)  # todo: reset
-    obs_embed_for_hippo = encoder_state.apply_fn({'params': encoder_state.params}, obs, actions)
+    obs_embed_for_hippo, _ = encoder_state.apply_fn({'params': encoder_state.params}, obs, actions)
     # o(t), r(t-1) = f(o(t-1),a(t-1))
     key, subkey = jax.random.split(key)
     env_state = env.reset_reward(env_state, rewards, subkey)  # fixme: reset reward with 0.9 prob
