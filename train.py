@@ -311,7 +311,8 @@ def model_step(env_state, buffer_state, encoder_state, hippo_state, policy_state
     # Mask obs ==========================================================================================
     key, subkey = jax.random.split(key)
     mask = jax.random.uniform(subkey, (obs.shape[0], 1, 1))
-    obs_incomplete = jnp.where(mask < visual_prob, obs, 0)
+    obs_incomplete = jnp.where(obs==2, 0, obs)
+    obs_incomplete = jnp.where(mask < visual_prob, obs_incomplete, 0)
     # obs[n, h, w], actions[n, 1], rewards[n, 1]
     # Encode obs and a_t-1 ===============================================================================
     obs_embed, action_embed = encoder_state.apply_fn({'params': encoder_state.params}, obs_incomplete, actions)
