@@ -124,7 +124,7 @@ def reset_reward(env_state, rewards, key):
     # fixme: if reward, set grid to 0 (no obstacles)
     new_grid, new_center = add_reward(new_grid, key, *env_state['grid'].shape)
     new_grid = jnp.where(jnp.isclose(rewards.reshape((-1, 1, 1)), 0.5) & reset_flag, new_grid, env_state['grid'])
-    new_center = jnp.where(jnp.isclose(rewards.reshape((-1, 1, 1)), 0.5) & reset_flag.reshape(-1,1), new_center, env_state['reward_center'])
+    new_center = jnp.where(jnp.isclose(rewards.reshape((-1, 1)), 0.5) & reset_flag.reshape(-1,1), new_center, env_state['reward_center'])
     env_state = dict(env_state, grid=new_grid, reward_center=new_center)
 
     return env_state
