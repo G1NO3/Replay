@@ -118,11 +118,13 @@ def step(env_state, actions):
 
 @jax.jit
 def reset_reward(env_state, rewards, key):
-    key, subkey = jax.random.split(key)
-    reset_flag = jax.random.uniform(subkey, (rewards.shape[0], 1, 1)) < 0
+    subkey0, subkey1 = jax.random.split(key)
+    reset_flag = jax.random.uniform(subkey1, (rewards.shape[0], 1, 1)) < 0
     new_grid = jnp.where(jnp.isclose(rewards.reshape((-1, 1, 1)), 0.5) & reset_flag, 0, env_state['grid'])
+    # print('grid:',env_state['grid'])
+    # print('reset_flag:',reset_flag)
     # fixme: if reward, set grid to 0 (no obstacles)
-    new_grid, new_center = add_reward(new_grid, key, *env_state['grid'].shape)
+    new_grid, new_center = add_reward(new_grid, subkey0, *env_state['grid'].shape)
     new_grid = jnp.where(jnp.isclose(rewards.reshape((-1, 1, 1)), 0.5) & reset_flag, new_grid, env_state['grid'])
     new_center = jnp.where(jnp.isclose(rewards.reshape((-1, 1)), 0.5) & reset_flag.reshape(-1,1), new_center, env_state['reward_center'])
     env_state = dict(env_state, grid=new_grid, reward_center=new_center)

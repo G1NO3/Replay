@@ -417,7 +417,7 @@ if __name__ == '__main__':
     parser.add_argument('--width', type=int, default=8)
     parser.add_argument('--height', type=int, default=8)
     parser.add_argument('--n_action', type=int, default=4)
-    parser.add_argument('--visual_prob', type=float, default=1)
+    parser.add_argument('--visual_prob', type=float, default=0.05)
     parser.add_argument('--load_encoder', type=str, default='./modelzoo/env8_encoder/checkpoint_995000')  # todo: checkpoint
     parser.add_argument('--load_hippo', type=str, default='./modelzoo/env8_hippo/checkpoint_995000')
     parser.add_argument('--load_policy', type=str, default='./modelzoo/r_policy_env8_995001')
@@ -438,7 +438,7 @@ if __name__ == '__main__':
                         help='whether to output continuous trajectories of one agent')
     parser.add_argument('--pics_per_output','-cp',type=int, default=20,
                         help='how many trajectories to be showed of one agent in output')
-    parser.add_argument('--hit_len', type=int, default=30)
+    parser.add_argument('--hit_len', type=int, default=300)
     parser.add_argument('--mid_spec_agent_th', '-mn', type=int, default=-1)
     parser.add_argument('--steps_per_output', '-mp', type=int, default=5)
     
