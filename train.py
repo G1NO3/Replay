@@ -66,7 +66,7 @@ def sample_from_policy(logit, key, temperature):
 
     subkeys = jax.random.split(key, num=logit.shape[0])
     subkeys = jnp.stack(subkeys, axis=0)
-    action = jax.vmap(sample_once, 0, 0)(logit, subkeys).astype(jnp.int8)
+    action = jax.vmap(sample_once, (0, 0), 0)(logit, subkeys).astype(jnp.int8)
     return action
 
 

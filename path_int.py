@@ -235,7 +235,8 @@ def a_loop(key, buffer_states, place_cell_state, running_encoder_state, running_
     rollouts = sample_from_buffer(buffer_states, sample_len, n_agents, subkey)
     # print(ei, len(rollouts))
     batch = prepare_batch(rollouts, place_cell_state)
-    batch['obs'] = mask_obs(batch['obs'], key,
+    key, subkey = jax.random.split(key)
+    batch['obs'] = mask_obs(batch['obs'], subkey,
                             sample_len, n_agents, visual_prob)
     # print(batch['place_cells'].reshape((-1, 100)).std(axis=0).mean(), 'place cell std')
 

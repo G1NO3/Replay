@@ -19,7 +19,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 import matplotlib as mpl
 
-np.set_printoptions(threshold=np.inf)
+jnp.set_printoptions(precision=3,threshold=jnp.inf)
 # def set_pos(grid, pos, value):
 #     grid = grid.at[pos[0], pos[1]].set(value)
 #     return grid, grid
@@ -229,7 +229,26 @@ def main(args):
                          args.n_agents, args.bottleneck_size, args.replay_steps, args.height, args.width,
                          args.visual_prob, temperature=0.05,
                          plot_args=args)
-        
+        if ei%args.sample_len==0 and ei!=0:
+            key, subkey = jax.random.split(key)
+            batch = buffer.sample_from_buffer(buffer_state, args.sample_len, subkey)
+            batch['his_traced_rewards'] = train.trace_back(batch['his_rewards'], args.gamma)
+            for k in batch:
+                jax.debug.print(k+' shape:')
+                jax.debug.print(str(batch[k].shape))
+            jax.debug.breakpoint()
+            # running_policy_state = train_step((running_encoder_state, running_hippo_state, running_policy_state),
+            #                                     batch,
+            #                                     args.sample_len, args.n_agents, args.hidden_size, args.replay_steps,
+            #                                     args.clip_param, args.entropy_coef, args.n_train_time)
+            buffer_state = buffer.clear_buffer(buffer_state)
+
+
+
+
+
+
+
         replayed_hippo_history, replayed_theta_history, output_history = replayed_hippo_theta_output
 
         # replay_hippo_theta_output: (replay_steps, n_agents, hidden_size), (replay_steps, n_agents, hidden_size)
@@ -355,9 +374,10 @@ def main(args):
                         whole_traj = hist_traj[n][i+comparison_pts[n]]
                         # display_trajectory(whole_traj, args.no_goal_replay, args)
                         plot_trajectory(whole_traj, args)
-                    hit_info = jnp.array(hit_info_since_first_meet)
-                    plt.suptitle('hit_percent_since_first_meet:'+str((hit_info[-args.hit_len:,0]/hit_info[-args.hit_len:,1]).mean()))
-                    print('hit_time/total_time:',hit_info)
+                    if hit_info_since_first_meet:
+                        hit_info = jnp.array(hit_info_since_first_meet)
+                        plt.suptitle('hit_percent_since_first_meet:'+str((hit_info[-args.hit_len:,0]/hit_info[-args.hit_len:,1]).mean()))
+                        print('hit_time/total_time:',hit_info)
                     comparison_pts = comparison_pts.at[n].add(args.pics_per_output)
                     print(f'agent {n},pts set to:',comparison_pts[n])
                     plt.show()
@@ -438,7 +458,7 @@ if __name__ == '__main__':
                         help='whether to output continuous trajectories of one agent')
     parser.add_argument('--pics_per_output','-cp',type=int, default=20,
                         help='how many trajectories to be showed of one agent in output')
-    parser.add_argument('--hit_len', type=int, default=300)
+    parser.add_argument('--hit_len', type=int, default=30)
     parser.add_argument('--mid_spec_agent_th', '-mn', type=int, default=-1)
     parser.add_argument('--steps_per_output', '-mp', type=int, default=5)
     
@@ -463,3 +483,6 @@ if __name__ == '__main__':
 ### 在每一个地方输出的reward大小画一张热力图
 ### 训练一个完美的hippocampus去排除海马的变量
 ### rl不mask看一下效果 ###
+
+
+###看一下batch里边各个量的下标到底是不是你想的那样……
